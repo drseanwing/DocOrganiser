@@ -575,7 +575,7 @@ class ExecutionEngine(BaseAgent):
             return True
             
         except Exception as e:
-            self.logger.error("copy_failed", source=str(source), target=str(target), error=str(e))
+            self.logger.error("copy_failed", source=str(source), target=str(target), error=str(e), exc_info=True)
             return False
     
     def _sanitize_filename(self, filename: str) -> str:

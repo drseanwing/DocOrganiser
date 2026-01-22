@@ -74,9 +74,9 @@ class ShortcutCreator:
             True if successful, False otherwise
         """
         try:
-            # Ensure .url extension
+            # Add .url extension (keeping original extension)
             if not shortcut_path.suffix == '.url':
-                shortcut_path = shortcut_path.with_suffix(shortcut_path.suffix + '.url')
+                shortcut_path = Path(str(shortcut_path) + '.url')
             
             # Ensure parent directory exists
             shortcut_path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,9 +123,9 @@ class ShortcutCreator:
             True if successful, False otherwise
         """
         try:
-            # Ensure .desktop extension
+            # Add .desktop extension (keeping original extension)
             if not shortcut_path.suffix == '.desktop':
-                shortcut_path = shortcut_path.with_suffix(shortcut_path.suffix + '.desktop')
+                shortcut_path = Path(str(shortcut_path) + '.desktop')
             
             # Ensure parent directory exists
             shortcut_path.parent.mkdir(parents=True, exist_ok=True)
