@@ -1,0 +1,132 @@
+# =============================================================================
+# Document Organizer v2 - Docker Compose
+# =============================================================================
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose logs -f        # View logs
+#   docker-compose exec processor python -m src.main  # Run processing
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: doc_organizer_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-document_organizer}
+      POSTGRES_USER: ${POSTGRES_USER:-doc_organizer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-doc_organizer} -d ${POSTGRES_DB:-document_organizer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Ollama - Local LLM
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: doc_organizer_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Document Processor - Main Application
+  # ---------------------------------------------------------------------------
+  processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: doc_organizer_processor
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-document_organizer}
+      POSTGRES_USER: ${POSTGRES_USER:-doc_organizer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      
+      # Ollama
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      
+      # Claude API
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-20250514}
+      
+      # Processing
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REVIEW_REQUIRED: ${REVIEW_REQUIRED:-true}
+      AUTO_APPROVE_SHORTCUTS: ${AUTO_APPROVE_SHORTCUTS:-false}
+      VERSION_ARCHIVE_STRATEGY: ${VERSION_ARCHIVE_STRATEGY:-subfolder}
+      
+      # Webhook callback (optional)
+      CALLBACK_URL: ${CALLBACK_URL:-}
+    volumes:
+      - ./data/input:/data/input
+      - ./data/source:/data/source
+      - ./data/working:/data/working
+      - ./data/output:/data/output
+      - ./data/reports:/data/reports
+      - ./src:/app/src:ro
+    working_dir: /app
+    command: ["python", "-m", "src.main", "--wait"]
+    # For one-shot processing, use:
+    # command: ["python", "-m", "src.main", "--job-id", "${JOB_ID}"]
+
+  # ---------------------------------------------------------------------------
+  # Adminer - Database UI (optional, for debugging)
+  # ---------------------------------------------------------------------------
+  adminer:
+    image: adminer:latest
+    container_name: doc_organizer_adminer
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "${ADMINER_PORT:-8080}:8080"
+    profiles:
+      - debug
+
+volumes:
+  postgres_data:
+    name: doc_organizer_postgres
+  ollama_data:
+    name: doc_organizer_ollama
+
+networks:
+  default:
+    name: doc_organizer_network
