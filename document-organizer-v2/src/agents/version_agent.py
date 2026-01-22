@@ -382,9 +382,21 @@ class VersionAgent(BaseAgent):
             return names[0]
         
         # Find the longest common prefix
+        common = self._find_common_prefix(names)
+        
+        # Clean up the common name
+        common = self._clean_common_name(common)
+        
+        # If too short, extract base from first name
+        if len(common) < 3:
+            common = self._extract_base_from_name(names[0])
+        
+        return common or "document"
+    
+    def _find_common_prefix(self, names: List[str]) -> str:
+        """Find the longest common prefix from a list of names."""
         common = names[0]
         for name in names[1:]:
-            # Compare character by character
             new_common = ""
             for c1, c2 in zip(common, name):
                 if c1.lower() == c2.lower():
@@ -392,17 +404,19 @@ class VersionAgent(BaseAgent):
                 else:
                     break
             common = new_common
-        
-        # Clean up the common name
-        common = common.strip('_- ()')
-        
-        # If too short, use first name as base
-        if len(common) < 3:
-            common = re.sub(r'[_\-\s]*\([^)]*\)$', '', names[0])
-            common = re.sub(r'[_\-\s]*(v|version|rev|draft|final)\d*$', '', common, flags=re.IGNORECASE)
-            common = common.strip('_- ')
-        
-        return common or "document"
+        return common
+    
+    def _clean_common_name(self, name: str) -> str:
+        """Clean up common name by removing trailing punctuation."""
+        return name.strip('_- ()')
+    
+    def _extract_base_from_name(self, name: str) -> str:
+        """Extract base name by removing version markers and parenthetical suffixes."""
+        # Remove parenthetical suffixes like " (1)", " (revised)"
+        base = re.sub(r'[_\-\s]*\([^)]*\)$', '', name)
+        # Remove common version markers
+        base = re.sub(r'[_\-\s]*(v|version|rev|draft|final)\d*$', '', base, flags=re.IGNORECASE)
+        return base.strip('_- ')
     
     async def _process_version_group(self, group: Dict):
         """
@@ -531,9 +545,11 @@ REASONING: <your explanation>"""
                     confirmed = 'yes' in line.lower()
                 elif line.startswith('CURRENT_INDEX:'):
                     try:
-                        idx = int(re.search(r'\d+', line).group())
-                        if 0 <= idx < len(files):
-                            current_index = idx
+                        match = re.search(r'\d+', line)
+                        if match:
+                            idx = int(match.group())
+                            if 0 <= idx < len(files):
+                                current_index = idx
                     except:
                         pass
                 elif line.startswith('REASONING:'):
@@ -631,11 +647,11 @@ REASONING: <your explanation>"""
             archive_strategy = self.settings.version_archive_strategy.value
             
             # Calculate archive path based on strategy
-            if archive_strategy == 'subfolder':
+            if archive_strategy == VersionArchiveStrategy.SUBFOLDER.value:
                 archive_path = str(Path(base_path) / self.settings.version_folder_name / base_name)
-            elif archive_strategy == 'inline':
+            elif archive_strategy == VersionArchiveStrategy.INLINE.value:
                 archive_path = base_path
-            else:  # separate_archive
+            else:  # VersionArchiveStrategy.SEPARATE_ARCHIVE
                 archive_path = f"/Archive/Versions/{base_name}"
             
             # Insert version chain
