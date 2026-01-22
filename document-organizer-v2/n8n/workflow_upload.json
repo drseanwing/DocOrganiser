@@ -1,0 +1,550 @@
+{
+  "name": "DocOrg - Upload Results",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "processing-complete",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-complete",
+      "name": "Webhook - Processing Complete",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "processing-complete"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract job ID from webhook\nconst item = $input.first();\nconst body = item.json.body || item.json;\n\nif (!body.job_id && !body.jobId) {\n  throw new Error('Missing job_id in webhook payload');\n}\n\nconst jobId = body.job_id || body.jobId;\n\nreturn [{\n  json: {\n    jobId: jobId,\n    outputPath: body.output_path,\n    stats: body.stats || {}\n  }\n}];"
+      },
+      "id": "extract-job-id",
+      "name": "Extract Job Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT * FROM processing_jobs WHERE id = '{{ $json.jobId }}';",
+        "options": {}
+      },
+      "id": "get-job-details",
+      "name": "Get Job Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "Document Organizer DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://login.microsoftonline.com/{{ $env.MS_TENANT_ID }}/oauth2/v2.0/token",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $env.MS_CLIENT_ID }}"
+            },
+            {
+              "name": "scope",
+              "value": "https://graph.microsoft.com/.default"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.MS_CLIENT_SECRET }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-token",
+      "name": "Get OAuth Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Determine upload strategy\nconst item = $input.first();\nconst strategy = $env.UPLOAD_STRATEGY || 'extract';\n\nreturn [{\n  json: {\n    ...item.json,\n    strategy: strategy\n  }\n}];"
+      },
+      "id": "determine-strategy",
+      "name": "Determine Upload Strategy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.strategy }}",
+              "value2": "extract"
+            }
+          ]
+        }
+      },
+      "id": "check-strategy",
+      "name": "Check Strategy",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract ZIP and prepare file list for upload\nconst AdmZip = require('adm-zip');\nconst path = require('path');\nconst item = $input.first();\n\nconst outputPath = item.json.outputPath || `/data/output/organized_${item.json.jobId}.zip`;\nconst zip = new AdmZip(outputPath);\nconst entries = zip.getEntries();\n\nconst files = [];\nconst folders = new Set();\n\n// Process entries\nfor (const entry of entries) {\n  const entryPath = entry.entryName;\n  \n  if (entry.isDirectory) {\n    folders.add(entryPath);\n  } else {\n    // Track parent folders\n    const parts = entryPath.split('/');\n    let currentPath = '';\n    for (let i = 0; i < parts.length - 1; i++) {\n      currentPath += (currentPath ? '/' : '') + parts[i];\n      folders.add(currentPath + '/');\n    }\n    \n    files.push({\n      path: entryPath,\n      name: path.basename(entryPath),\n      content: entry.getData(),\n      size: entry.header.size,\n      jobId: item.json.jobId,\n      accessToken: item.json.access_token\n    });\n  }\n}\n\n// Sort folders by depth (create parent folders first)\nconst sortedFolders = Array.from(folders).sort((a, b) => {\n  return a.split('/').length - b.split('/').length;\n});\n\nconsole.log(`Extracted ${files.length} files and ${sortedFolders.length} folders`);\n\nreturn [{\n  json: {\n    jobId: item.json.jobId,\n    accessToken: item.json.access_token,\n    sourceType: item.json.source_type,\n    sourcePath: item.json.source_path,\n    folders: sortedFolders,\n    files: files,\n    totalFiles: files.length\n  }\n}];"
+      },
+      "id": "extract-zip",
+      "name": "Extract ZIP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create target folder structure\nconst item = $input.first();\nconst folders = item.json.folders;\nconst accessToken = item.json.accessToken;\nconst sourceType = item.json.sourceType;\nconst basePath = $env.TARGET_PATH || item.json.sourcePath + '_organized';\n\nconst results = [];\n\n// Create folders sequentially\nfor (const folder of folders) {\n  const folderPath = basePath + '/' + folder;\n  const folderName = folder.split('/').pop();\n  const parentPath = folder.substring(0, folder.lastIndexOf('/'));\n  const fullParentPath = basePath + (parentPath ? '/' + parentPath : '');\n  \n  try {\n    const baseUrl = sourceType === 'onedrive'\n      ? 'https://graph.microsoft.com/v1.0/me/drive/root:'\n      : `https://graph.microsoft.com/v1.0/sites/${$env.SOURCE_SITE_ID}/drive/root:`;\n    \n    const response = await $http.request({\n      method: 'POST',\n      url: `${baseUrl}${fullParentPath}:/children`,\n      headers: {\n        'Authorization': `Bearer ${accessToken}`,\n        'Content-Type': 'application/json'\n      },\n      body: {\n        name: folderName,\n        folder: {},\n        '@microsoft.graph.conflictBehavior': 'rename'\n      }\n    });\n    \n    results.push({\n      path: folderPath,\n      id: response.id,\n      created: true\n    });\n    \n    console.log(`Created folder: ${folderPath}`);\n  } catch (error) {\n    // Folder might already exist, continue\n    console.log(`Folder creation skipped (may exist): ${folderPath}`);\n  }\n  \n  // Rate limiting delay\n  await new Promise(resolve => setTimeout(resolve, 100));\n}\n\nreturn [{\n  json: {\n    ...item.json,\n    foldersCreated: results.length\n  }\n}];"
+      },
+      "id": "create-folders",
+      "name": "Create Folder Structure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare files for batch upload\nconst item = $input.first();\nconst files = item.json.files;\n\nreturn files.map(file => ({\n  json: {\n    ...file,\n    sourceType: item.json.sourceType,\n    basePath: $env.TARGET_PATH || item.json.sourcePath + '_organized'\n  },\n  binary: {\n    data: {\n      data: file.content.toString('base64'),\n      mimeType: 'application/octet-stream',\n      fileName: file.name\n    }\n  }\n}));"
+      },
+      "id": "prepare-files",
+      "name": "Prepare Files for Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 240]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "split-files",
+      "name": "Split Into Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2220, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Upload file with size-based strategy\nconst item = $input.first();\nconst file = item.json;\nconst fileContent = Buffer.from(item.binary.data.data, 'base64');\nconst fileSize = fileContent.length;\nconst accessToken = file.accessToken;\nconst targetPath = file.basePath + '/' + file.path;\n\nconst baseUrl = file.sourceType === 'onedrive'\n  ? 'https://graph.microsoft.com/v1.0/me/drive/root:'\n  : `https://graph.microsoft.com/v1.0/sites/${$env.SOURCE_SITE_ID}/drive/root:`;\n\nlet uploadResult;\n\nif (fileSize < 4 * 1024 * 1024) {\n  // Small file: direct upload\n  uploadResult = await $http.request({\n    method: 'PUT',\n    url: `${baseUrl}${targetPath}:/content`,\n    headers: {\n      'Authorization': `Bearer ${accessToken}`,\n      'Content-Type': 'application/octet-stream'\n    },\n    body: fileContent\n  });\n  \n  console.log(`Uploaded (direct): ${targetPath}`);\n} else {\n  // Large file: upload session\n  const sessionResponse = await $http.request({\n    method: 'POST',\n    url: `${baseUrl}${targetPath}:/createUploadSession`,\n    headers: {\n      'Authorization': `Bearer ${accessToken}`,\n      'Content-Type': 'application/json'\n    },\n    body: {\n      item: {\n        '@microsoft.graph.conflictBehavior': 'rename'\n      }\n    }\n  });\n  \n  const uploadUrl = sessionResponse.uploadUrl;\n  const chunkSize = 320 * 1024; // 320 KB chunks\n  let offset = 0;\n  \n  while (offset < fileSize) {\n    const end = Math.min(offset + chunkSize, fileSize);\n    const chunk = fileContent.slice(offset, end);\n    \n    const chunkResponse = await $http.request({\n      method: 'PUT',\n      url: uploadUrl,\n      headers: {\n        'Content-Length': chunk.length.toString(),\n        'Content-Range': `bytes ${offset}-${end - 1}/${fileSize}`\n      },\n      body: chunk\n    });\n    \n    offset = end;\n    console.log(`Uploaded chunk: ${offset}/${fileSize} bytes`);\n  }\n  \n  console.log(`Uploaded (session): ${targetPath}`);\n}\n\nreturn [{\n  json: {\n    jobId: file.jobId,\n    path: targetPath,\n    size: fileSize,\n    uploaded: true\n  }\n}];"
+      },
+      "id": "upload-file",
+      "name": "Upload File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Upload complete - aggregate results\nconst items = $input.all();\nconst jobId = items[0].json.jobId;\nconst uploadedCount = items.length;\n\nreturn [{\n  json: {\n    jobId: jobId,\n    uploadedFiles: uploadedCount,\n    success: true\n  }\n}];"
+      },
+      "id": "aggregate-results",
+      "name": "Aggregate Upload Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Upload ZIP as-is (no extraction)\nconst fs = require('fs');\nconst item = $input.first();\nconst outputPath = item.json.outputPath || `/data/output/organized_${item.json.jobId}.zip`;\nconst zipContent = fs.readFileSync(outputPath);\nconst accessToken = item.json.access_token;\nconst sourceType = item.json.source_type;\nconst targetPath = $env.TARGET_PATH || item.json.source_path + '_organized.zip';\n\nconst baseUrl = sourceType === 'onedrive'\n  ? 'https://graph.microsoft.com/v1.0/me/drive/root:'\n  : `https://graph.microsoft.com/v1.0/sites/${$env.SOURCE_SITE_ID}/drive/root:`;\n\nlet uploadResult;\nconst fileSize = zipContent.length;\n\nif (fileSize < 4 * 1024 * 1024) {\n  // Direct upload for small files\n  uploadResult = await $http.request({\n    method: 'PUT',\n    url: `${baseUrl}${targetPath}:/content`,\n    headers: {\n      'Authorization': `Bearer ${accessToken}`,\n      'Content-Type': 'application/zip'\n    },\n    body: zipContent\n  });\n} else {\n  // Upload session for large files\n  const sessionResponse = await $http.request({\n    method: 'POST',\n    url: `${baseUrl}${targetPath}:/createUploadSession`,\n    headers: {\n      'Authorization': `Bearer ${accessToken}`,\n      'Content-Type': 'application/json'\n    },\n    body: {\n      item: {\n        '@microsoft.graph.conflictBehavior': 'rename'\n      }\n    }\n  });\n  \n  const uploadUrl = sessionResponse.uploadUrl;\n  const chunkSize = 320 * 1024;\n  let offset = 0;\n  \n  while (offset < fileSize) {\n    const end = Math.min(offset + chunkSize, fileSize);\n    const chunk = zipContent.slice(offset, end);\n    \n    await $http.request({\n      method: 'PUT',\n      url: uploadUrl,\n      headers: {\n        'Content-Length': chunk.length.toString(),\n        'Content-Range': `bytes ${offset}-${end - 1}/${fileSize}`\n      },\n      body: chunk\n    });\n    \n    offset = end;\n  }\n}\n\nconsole.log(`Uploaded ZIP: ${targetPath}`);\n\nreturn [{\n  json: {\n    jobId: item.json.jobId,\n    zipPath: targetPath,\n    zipSize: fileSize,\n    uploaded: true\n  }\n}];"
+      },
+      "id": "upload-zip-only",
+      "name": "Upload ZIP Only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 360]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE processing_jobs SET status = 'completed', current_phase = 'completed', completed_at = NOW(), output_uploaded = TRUE WHERE id = '{{ $json.jobId }}' RETURNING *;",
+        "options": {}
+      },
+      "id": "complete-job",
+      "name": "Complete Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [2880, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "Document Organizer DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cleanup temporary files\nconst fs = require('fs');\nconst item = $input.first();\nconst jobId = item.json.id;\n\ntry {\n  // Clean up output files\n  const outputPath = `/data/output/organized_${jobId}.zip`;\n  if (fs.existsSync(outputPath)) {\n    fs.unlinkSync(outputPath);\n    console.log(`Deleted: ${outputPath}`);\n  }\n  \n  // Clean up source files if configured\n  if ($env.CLEANUP_SOURCE === 'true') {\n    const sourcePath = `/data/input/source_${jobId}.zip`;\n    if (fs.existsSync(sourcePath)) {\n      fs.unlinkSync(sourcePath);\n      console.log(`Deleted: ${sourcePath}`);\n    }\n  }\n} catch (error) {\n  console.error(`Cleanup error: ${error.message}`);\n}\n\nreturn [item];"
+      },
+      "id": "cleanup-files",
+      "name": "Cleanup Temporary Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $env.SEND_NOTIFICATION }}",
+              "value2": "true"
+            }
+          ]
+        }
+      },
+      "id": "check-notification",
+      "name": "Check Send Notification",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [3320, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $env.NOTIFICATION_EMAIL }}",
+        "subject": "=Document Organization Complete - Job {{ $json.id }}",
+        "text": "=Job ID: {{ $json.id }}\\nStatus: {{ $json.status }}\\nFiles Processed: {{ $json.source_file_count }}\\nCompleted: {{ $json.completed_at }}\\n\\nThe document organization has been completed successfully and uploaded to the cloud.",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [3540, 240],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credential",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3540, 360]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Error handler\nconst item = $input.first();\nconst error = item.json.error || 'Upload failed';\n\nconsole.error(`Upload error: ${error}`);\n\nreturn [{\n  json: {\n    success: false,\n    jobId: item.json.jobId || item.json.id,\n    error: error\n  }\n}];"
+      },
+      "id": "handle-error",
+      "name": "Handle Upload Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 480]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE processing_jobs SET status = 'failed', error_message = '{{ $json.error }}', current_phase = 'uploading' WHERE id = '{{ $json.jobId }}';",
+        "options": {}
+      },
+      "id": "mark-upload-failed",
+      "name": "Mark Upload Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1780, 480],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "Document Organizer DB"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Processing Complete": {
+      "main": [
+        [
+          {
+            "node": "Extract Job Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Job Info": {
+      "main": [
+        [
+          {
+            "node": "Get Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Job Details": {
+      "main": [
+        [
+          {
+            "node": "Get OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get OAuth Token": {
+      "main": [
+        [
+          {
+            "node": "Determine Upload Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Upload Strategy": {
+      "main": [
+        [
+          {
+            "node": "Check Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Strategy": {
+      "main": [
+        [
+          {
+            "node": "Extract ZIP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload ZIP Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract ZIP": {
+      "main": [
+        [
+          {
+            "node": "Create Folder Structure",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Handle Upload Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Folder Structure": {
+      "main": [
+        [
+          {
+            "node": "Prepare Files for Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Files for Upload": {
+      "main": [
+        [
+          {
+            "node": "Split Into Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Batches": {
+      "main": [
+        [
+          {
+            "node": "Upload File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate Upload Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload File": {
+      "main": [
+        [
+          {
+            "node": "Split Into Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Upload Results": {
+      "main": [
+        [
+          {
+            "node": "Complete Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload ZIP Only": {
+      "main": [
+        [
+          {
+            "node": "Complete Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Job": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Temporary Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Temporary Files": {
+      "main": [
+        [
+          {
+            "node": "Check Send Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Send Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Email Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Upload Error": {
+      "main": [
+        [
+          {
+            "node": "Mark Upload Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Upload Failed": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "1",
+      "name": "Document Organizer"
+    }
+  ],
+  "pinData": {},
+  "meta": {
+    "instanceId": "doc-organizer-n8n"
+  }
+}

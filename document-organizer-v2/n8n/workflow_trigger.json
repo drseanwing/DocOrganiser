@@ -1,0 +1,293 @@
+{
+  "name": "DocOrg - Trigger Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trigger-processing",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Trigger Processing",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "trigger-processing"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate webhook payload\nconst item = $input.first();\nconst body = item.json.body || item.json;\n\nif (!body.jobId || !body.zipPath) {\n  throw new Error('Missing required fields: jobId and zipPath');\n}\n\nreturn [{\n  json: {\n    jobId: body.jobId,\n    zipPath: body.zipPath,\n    fileCount: body.fileCount || 0\n  }\n}];"
+      },
+      "id": "validate-payload",
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify ZIP file exists\nconst fs = require('fs');\nconst item = $input.first();\nconst zipPath = item.json.zipPath;\n\nif (!fs.existsSync(zipPath)) {\n  throw new Error(`ZIP file not found: ${zipPath}`);\n}\n\nconst stats = fs.statSync(zipPath);\nconsole.log(`ZIP file verified: ${zipPath} (${stats.size} bytes)`);\n\nreturn [{\n  json: {\n    jobId: item.json.jobId,\n    zipPath: zipPath,\n    zipSize: stats.size,\n    fileCount: item.json.fileCount,\n    verified: true\n  }\n}];"
+      },
+      "id": "verify-zip",
+      "name": "Verify ZIP Exists",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE processing_jobs SET status = 'processing', current_phase = 'processing', started_at = NOW() WHERE id = '{{ $json.jobId }}' RETURNING *;",
+        "options": {}
+      },
+      "id": "update-job-processing",
+      "name": "Update Job - Processing",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [900, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "Document Organizer DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://{{ $env.PROCESSOR_HOST || 'processor' }}:{{ $env.PROCESSOR_PORT || '8000' }}/process",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "job_id",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "name": "zip_path",
+              "value": "={{ $json.source_zip_path }}"
+            },
+            {
+              "name": "callback_url",
+              "value": "={{ $env.N8N_WEBHOOK_URL }}/webhook/processing-callback"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-container",
+      "name": "Trigger Docker Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alternative: File-based trigger\n// If container watches /data/input directory\nconst fs = require('fs');\nconst path = require('path');\nconst item = $input.first();\nconst zipPath = item.json.zipPath;\n\n// Create a trigger file\nconst triggerFile = zipPath + '.ready';\nfs.writeFileSync(triggerFile, JSON.stringify({\n  jobId: item.json.jobId,\n  zipPath: zipPath,\n  timestamp: new Date().toISOString(),\n  callbackUrl: $env.N8N_WEBHOOK_URL + '/webhook/processing-callback'\n}));\n\nconsole.log(`Created trigger file: ${triggerFile}`);\n\nreturn [item];"
+      },
+      "id": "file-trigger-alternative",
+      "name": "File-based Trigger (Alternative)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 480]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $env.TRIGGER_METHOD }}",
+              "value2": "file"
+            }
+          ]
+        }
+      },
+      "id": "check-trigger-method",
+      "name": "Check Trigger Method",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Error handling\nconst item = $input.first();\nconst error = item.json.error || 'Unknown error';\n\nconsole.error(`Processing trigger failed: ${error}`);\n\nreturn [{\n  json: {\n    success: false,\n    error: error,\n    jobId: item.json.jobId,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "handle-error",
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 480]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE processing_jobs SET status = 'failed', error_message = '{{ $json.error }}', current_phase = 'processing' WHERE id = '{{ $json.jobId }}';",
+        "options": {}
+      },
+      "id": "mark-failed",
+      "name": "Mark Job Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [900, 580],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "Document Organizer DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "respond-error",
+      "name": "Respond with Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 580]
+    }
+  ],
+  "connections": {
+    "Webhook - Trigger Processing": {
+      "main": [
+        [
+          {
+            "node": "Validate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Payload": {
+      "main": [
+        [
+          {
+            "node": "Verify ZIP Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify ZIP Exists": {
+      "main": [
+        [
+          {
+            "node": "Update Job - Processing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Job - Processing": {
+      "main": [
+        [
+          {
+            "node": "Check Trigger Method",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Docker Container",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Docker Container": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Trigger Method": {
+      "main": [
+        [
+          {
+            "node": "File-based Trigger (Alternative)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "File-based Trigger (Alternative)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Error": {
+      "main": [
+        [
+          {
+            "node": "Mark Job Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Job Failed": {
+      "main": [
+        [
+          {
+            "node": "Respond with Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "1",
+      "name": "Document Organizer"
+    }
+  ],
+  "pinData": {},
+  "meta": {
+    "instanceId": "doc-organizer-n8n"
+  }
+}
