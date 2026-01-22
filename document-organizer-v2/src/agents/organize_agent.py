@@ -119,9 +119,19 @@ class OrganizeAgent(BaseAgent):
             self.logger.info("calling_claude_api", file_count=len(files))
             self.update_progress("Calling Claude API", 0)
             
+            system_prompt = """You are an expert document management consultant. 
+Respond with ONLY valid JSON matching this structure:
+{
+  "naming_schemas": [{document_type, pattern, example, description, placeholders}],
+  "tag_taxonomy": {tag_name: {description, children: {...}}},
+  "directory_structure": [{path, purpose, expected_types}],
+  "file_assignments": [{file_id, proposed_name, proposed_path, proposed_tags, reasoning}]
+}
+No markdown formatting or explanations."""
+            
             response = await self.claude_service.generate_json(
                 prompt=prompt,
-                system_prompt="You are an expert document management consultant. Respond with ONLY valid JSON, no markdown formatting or explanations.",
+                system_prompt=system_prompt,
                 max_retries=3
             )
             
@@ -453,7 +463,20 @@ Respond with ONLY valid JSON (no markdown, no explanation):
             
             missing_ids = file_ids - assigned_ids
             if missing_ids:
-                self.logger.warning("missing_file_assignments", count=len(missing_ids))
+                self.logger.warning("missing_file_assignments", 
+                                  count=len(missing_ids),
+                                  missing_ids=list(missing_ids)[:10])  # Log first 10
+                
+                # If too many missing (> 10% of files), this might indicate a problem
+                missing_pct = len(missing_ids) / len(files) * 100
+                if missing_pct > 10:
+                    self.logger.error("too_many_missing_assignments", 
+                                    missing_count=len(missing_ids),
+                                    total_files=len(files),
+                                    missing_pct=f"{missing_pct:.1f}%")
+                    # Still add default assignments but log as error
+                    self._errors.append(f"Claude failed to assign {len(missing_ids)} files ({missing_pct:.1f}%)")
+                
                 # Add default assignments for missing files
                 for file_id in missing_ids:
                     file_assignments.append({

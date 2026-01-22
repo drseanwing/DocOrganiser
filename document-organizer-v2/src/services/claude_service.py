@@ -197,24 +197,39 @@ class ClaudeService:
             # Try to extract from markdown code blocks
             try:
                 # Look for ```json ... ``` or ``` ... ```
+                # Handle various whitespace and formatting
                 import re
+                
+                # Try JSON code block first
                 json_match = re.search(
-                    r'```(?:json)?\s*\n?(.*?)\n?```',
+                    r'```json\s*\n(.*?)\n```',
                     response_text,
-                    re.DOTALL
+                    re.DOTALL | re.IGNORECASE
                 )
                 if json_match:
                     json_str = json_match.group(1).strip()
                     return json.loads(json_str)
                 
-                # If no code block, try to find JSON object
+                # Try generic code block
                 json_match = re.search(
-                    r'\{.*\}',
+                    r'```\s*\n(.*?)\n```',
                     response_text,
                     re.DOTALL
                 )
                 if json_match:
-                    return json.loads(json_match.group(0))
+                    json_str = json_match.group(1).strip()
+                    # Verify it starts with { or [
+                    if json_str.startswith('{') or json_str.startswith('['):
+                        return json.loads(json_str)
+                
+                # If no code block, try to find JSON object/array
+                json_match = re.search(
+                    r'(\{.*\}|\[.*\])',
+                    response_text,
+                    re.DOTALL
+                )
+                if json_match:
+                    return json.loads(json_match.group(1))
                     
             except Exception as e:
                 logger.error("json_extraction_failed", 
