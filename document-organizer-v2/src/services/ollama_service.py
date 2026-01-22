@@ -43,8 +43,9 @@ class OllamaService:
                     data = response.json()
                     models = [m["name"] for m in data.get("models", [])]
                     # Check if our model is available (with or without tag)
+                    model_base = self.model.split(':')[0] if ':' in self.model else self.model
                     model_available = any(
-                        self.model in m or m.startswith(self.model.split(':')[0])
+                        self.model in m or m.startswith(model_base)
                         for m in models
                     )
                     if not model_available:
