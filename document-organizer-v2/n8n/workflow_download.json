@@ -1,19 +1,35 @@
 {
-  "name": "DocOrg - Download from Cloud",
+  "name": "Document Organizer - Download Folder",
   "nodes": [
     {
       "parameters": {},
-      "id": "manual-trigger",
-      "name": "Manual/Schedule Trigger",
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [240, 300]
     },
     {
       "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "=https://login.microsoftonline.com/{{ $env.MS_TENANT_ID }}/oauth2/v2.0/token",
-        "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -24,6 +40,7 @@
           ]
         },
         "sendBody": true,
+        "contentType": "form-urlencoded",
         "bodyParameters": {
           "parameters": [
             {
@@ -44,85 +61,117 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "timeout": 30000
+        }
       },
-      "id": "get-oauth-token",
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
       "name": "Get OAuth Token",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 300]
+      "position": [500, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO processing_jobs (source_type, source_path, status, current_phase) VALUES ('{{ $env.SOURCE_TYPE }}', '{{ $env.SOURCE_PATH }}', 'downloading', 'downloading') RETURNING id, created_at;",
+        "query": "INSERT INTO processing_jobs (source_type, source_path, status, current_phase)\nVALUES ('{{ $env.SOURCE_TYPE }}', '{{ $env.SOURCE_PATH }}', 'downloading', 'downloading')\nRETURNING id, source_type, source_path, status, created_at;",
         "options": {}
       },
-      "id": "create-job",
+      "id": "d4e5f6a7-b8c9-0123-def0-123456789abc",
       "name": "Create Processing Job",
       "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [680, 300],
+      "typeVersion": 2.5,
+      "position": [720, 400],
       "credentials": {
         "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
         }
       }
     },
     {
       "parameters": {
+        "jsCode": "// Store job info for later use\nconst jobId = $input.first().json.id;\nconst sourceType = $env.SOURCE_TYPE || 'onedrive';\nconst sourcePath = $env.SOURCE_PATH || '/Documents/ToOrganize';\nconst siteId = $env.SOURCE_SITE_ID || '';\n\n// Determine base URL based on source type\nlet baseUrl;\nif (sourceType === 'sharepoint' && siteId) {\n  baseUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:${sourcePath}:/children`;\n} else {\n  baseUrl = `https://graph.microsoft.com/v1.0/me/drive/root:${sourcePath}:/children`;\n}\n\nreturn [\n  {\n    json: {\n      jobId: jobId,\n      sourceType: sourceType,\n      sourcePath: sourcePath,\n      siteId: siteId,\n      baseUrl: baseUrl,\n      accessToken: $('Get OAuth Token').first().json.access_token\n    }\n  }\n];"
+      },
+      "id": "e5f6a7b8-c9d0-1234-ef01-23456789abcd",
+      "name": "Prepare Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 400]
+    },
+    {
+      "parameters": {
         "method": "GET",
-        "url": "={{ $env.SOURCE_TYPE === 'onedrive' ? 'https://graph.microsoft.com/v1.0/me/drive/root:/' + $env.SOURCE_PATH + ':/children' : 'https://graph.microsoft.com/v1.0/sites/' + $env.SOURCE_SITE_ID + '/drive/root:/' + $env.SOURCE_PATH + ':/children' }}",
+        "url": "={{ $json.baseUrl }}",
         "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Authorization",
-              "value": "=Bearer {{ $json.access_token }}"
+              "value": "=Bearer {{ $json.accessToken }}"
             }
           ]
         },
         "options": {
-          "pagination": true,
-          "paginationCompleteExpression": "={{ !$response.body['@odata.nextLink'] }}",
-          "paginationUrl": "={{ $response.body['@odata.nextLink'] }}"
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
         }
       },
-      "id": "list-folder-root",
+      "id": "f6a7b8c9-d0e1-2345-f012-3456789abcde",
       "name": "List Folder Contents",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 300]
+      "position": [1160, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
-        "jsCode": "// Build complete file list from recursive folder listing\nconst items = $input.all();\nconst accessToken = items[0].json.access_token;\nconst jobId = items[0].json.id;\n\nconst files = [];\nconst folders = [];\n\n// Process initial items\nfor (const item of items) {\n  if (item.json.value) {\n    for (const entry of item.json.value) {\n      if (entry.folder) {\n        folders.push({\n          id: entry.id,\n          name: entry.name,\n          path: entry.parentReference.path + '/' + entry.name\n        });\n      } else if (entry.file) {\n        files.push({\n          id: entry.id,\n          name: entry.name,\n          path: entry.parentReference.path,\n          size: entry.size,\n          downloadUrl: entry['@microsoft.graph.downloadUrl'],\n          jobId: jobId,\n          accessToken: accessToken\n        });\n      }\n    }\n  }\n}\n\n// Recursive function to fetch folder contents\nconst fetchFolderContents = async (folderId) => {\n  const sourceType = $env.SOURCE_TYPE;\n  const baseUrl = sourceType === 'onedrive' \n    ? `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`\n    : `https://graph.microsoft.com/v1.0/sites/${$env.SOURCE_SITE_ID}/drive/items/${folderId}/children`;\n  \n  let url = baseUrl;\n  while (url) {\n    const response = await $http.request({\n      method: 'GET',\n      url: url,\n      headers: {\n        'Authorization': `Bearer ${accessToken}`\n      }\n    });\n    \n    for (const entry of response.value) {\n      if (entry.folder) {\n        folders.push({\n          id: entry.id,\n          name: entry.name,\n          path: entry.parentReference.path + '/' + entry.name\n        });\n      } else if (entry.file) {\n        files.push({\n          id: entry.id,\n          name: entry.name,\n          path: entry.parentReference.path,\n          size: entry.size,\n          downloadUrl: entry['@microsoft.graph.downloadUrl'],\n          jobId: jobId,\n          accessToken: accessToken\n        });\n      }\n    }\n    \n    url = response['@odata.nextLink'];\n  }\n};\n\n// Process folders recursively\nlet processedCount = 0;\nwhile (processedCount < folders.length) {\n  await fetchFolderContents(folders[processedCount].id);\n  processedCount++;\n}\n\nconsole.log(`Found ${files.length} files in ${folders.length} folders`);\n\nreturn files.map(f => ({\n  json: f\n}));"
+        "jsCode": "// Build file list from folder contents\n// This recursively lists all files (simplified for n8n)\nconst response = $input.first().json;\nconst items = response.body?.value || [];\nconst jobId = $('Prepare Request').first().json.jobId;\nconst accessToken = $('Prepare Request').first().json.accessToken;\nconst sourceType = $('Prepare Request').first().json.sourceType;\nconst siteId = $('Prepare Request').first().json.siteId;\n\nconst files = [];\nconst folders = [];\n\n// Separate files and folders\nfor (const item of items) {\n  if (item.folder) {\n    folders.push({\n      id: item.id,\n      name: item.name,\n      path: item.parentReference?.path || '',\n      webUrl: item.webUrl\n    });\n  } else if (item.file) {\n    files.push({\n      id: item.id,\n      name: item.name,\n      path: (item.parentReference?.path || '').replace(/^.*root:/, ''),\n      size: item.size,\n      downloadUrl: item['@microsoft.graph.downloadUrl'],\n      mimeType: item.file?.mimeType,\n      createdAt: item.createdDateTime,\n      modifiedAt: item.lastModifiedDateTime\n    });\n  }\n}\n\n// Store file list and job metadata\nreturn [\n  {\n    json: {\n      jobId: jobId,\n      accessToken: accessToken,\n      sourceType: sourceType,\n      siteId: siteId,\n      files: files,\n      folders: folders,\n      totalFiles: files.length,\n      hasMorePages: !!response.body?.['@odata.nextLink'],\n      nextLink: response.body?.['@odata.nextLink']\n    }\n  }\n];"
       },
-      "id": "build-file-list",
-      "name": "Build Complete File List",
+      "id": "a7b8c9d0-e1f2-3456-0123-456789abcdef",
+      "name": "Build File List",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 300]
+      "position": [1380, 400]
     },
     {
       "parameters": {
-        "batchSize": 10,
+        "jsCode": "// Prepare files for download\nconst data = $input.first().json;\nconst files = data.files || [];\n\n// Return each file as a separate item for the loop\nreturn files.map(file => ({\n  json: {\n    ...file,\n    jobId: data.jobId,\n    accessToken: data.accessToken,\n    totalFiles: data.totalFiles\n  }\n}));"
+      },
+      "id": "b8c9d0e1-f2a3-4567-1234-56789abcdef0",
+      "name": "Split Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
         "options": {}
       },
-      "id": "split-in-batches",
-      "name": "Split Into Batches",
+      "id": "c9d0e1f2-a3b4-5678-2345-6789abcdef01",
+      "name": "Batch Files",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [1340, 300]
+      "position": [1820, 400]
     },
     {
       "parameters": {
         "method": "GET",
         "url": "={{ $json.downloadUrl }}",
-        "authentication": "none",
         "options": {
+          "timeout": 120000,
           "response": {
             "response": {
               "responseFormat": "file"
@@ -130,127 +179,149 @@
           }
         }
       },
-      "id": "download-file",
+      "id": "d0e1f2a3-b4c5-6789-3456-789abcdef012",
       "name": "Download File",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1560, 300]
+      "position": [2040, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "jsCode": "// Save downloaded file to temp directory\nconst fs = require('fs');\nconst path = require('path');\nconst crypto = require('crypto');\n\nconst item = $input.first();\nconst jobId = item.json.jobId;\nconst fileName = item.json.name;\nconst filePath = item.json.path;\nconst fileData = await item.binary.data.buffer();\n\n// Create temp directory\nconst tempDir = `/tmp/download_${jobId}`;\nif (!fs.existsSync(tempDir)) {\n  fs.mkdirSync(tempDir, { recursive: true });\n}\n\n// Create subdirectories matching source structure\nconst relativePath = filePath.replace(/^\\/drive\\/root:/, '').replace(/^:/, '');\nconst fullPath = path.join(tempDir, relativePath);\nconst dirPath = path.dirname(fullPath);\n\nif (!fs.existsSync(dirPath)) {\n  fs.mkdirSync(dirPath, { recursive: true });\n}\n\n// Save file\nconst targetPath = path.join(fullPath, fileName);\nfs.writeFileSync(targetPath, fileData);\n\nconsole.log(`Saved: ${targetPath}`);\n\nreturn [{\n  json: {\n    jobId: jobId,\n    filePath: targetPath,\n    relativePath: path.join(relativePath, fileName),\n    size: fileData.length,\n    saved: true\n  }\n}];"
+        "jsCode": "// Collect downloaded files and create ZIP\nconst fs = require('fs');\nconst path = require('path');\n\n// Get all items from the current batch\nconst items = $input.all();\nconst jobId = items[0]?.json?.jobId || 'unknown';\n\nconst tempDir = `/tmp/download_${jobId}`;\nconst inputDir = '/data/input';\nconst zipPath = `${inputDir}/source_${jobId}.zip`;\n\n// Ensure directories exist\nif (!fs.existsSync(tempDir)) {\n  fs.mkdirSync(tempDir, { recursive: true });\n}\nif (!fs.existsSync(inputDir)) {\n  fs.mkdirSync(inputDir, { recursive: true });\n}\n\n// Track downloaded files\nconst downloadedFiles = [];\nlet totalSize = 0;\n\nfor (const item of items) {\n  const filePath = item.json.path || '';\n  const fileName = item.json.name;\n  const fileData = item.binary?.data?.data;\n  \n  if (fileData && fileName) {\n    // Create subdirectory structure\n    const targetDir = path.join(tempDir, filePath);\n    if (!fs.existsSync(targetDir)) {\n      fs.mkdirSync(targetDir, { recursive: true });\n    }\n    \n    // Write file\n    const targetPath = path.join(targetDir, fileName);\n    const buffer = Buffer.from(fileData, 'base64');\n    fs.writeFileSync(targetPath, buffer);\n    \n    downloadedFiles.push({\n      name: fileName,\n      path: filePath,\n      size: buffer.length\n    });\n    totalSize += buffer.length;\n  }\n}\n\n// Create ZIP using system command (archiver not available in n8n by default)\n// We'll use a shell command or expect archiver to be installed\ntry {\n  const { execSync } = require('child_process');\n  execSync(`cd ${tempDir} && zip -r ${zipPath} .`, { timeout: 300000 });\n} catch (zipError) {\n  // Fallback: try using tar if zip not available\n  try {\n    const { execSync } = require('child_process');\n    const tarPath = zipPath.replace('.zip', '.tar.gz');\n    execSync(`cd ${tempDir} && tar -czf ${tarPath} .`, { timeout: 300000 });\n  } catch (e) {\n    return [{ json: { error: 'Failed to create archive: ' + e.message } }];\n  }\n}\n\n// Cleanup temp directory\ntry {\n  const { execSync } = require('child_process');\n  execSync(`rm -rf ${tempDir}`);\n} catch (e) {\n  // Ignore cleanup errors\n}\n\nreturn [\n  {\n    json: {\n      jobId: jobId,\n      zipPath: zipPath,\n      fileCount: downloadedFiles.length,\n      totalSize: totalSize,\n      files: downloadedFiles\n    }\n  }\n];"
       },
-      "id": "save-file-temp",
-      "name": "Save File to Temp",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1780, 300]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Create ZIP archive from downloaded files\nconst AdmZip = require('adm-zip');\nconst fs = require('fs');\nconst path = require('path');\n\nconst items = $input.all();\nconst jobId = items[0].json.jobId;\nconst tempDir = `/tmp/download_${jobId}`;\nconst outputDir = '/data/input';\nconst outputPath = path.join(outputDir, `source_${jobId}.zip`);\n\n// Ensure output directory exists\nif (!fs.existsSync(outputDir)) {\n  fs.mkdirSync(outputDir, { recursive: true });\n}\n\n// Create ZIP\nconst zip = new AdmZip();\n\n// Add all files from temp directory\nfunction addDirectoryToZip(dirPath, zipPath = '') {\n  const entries = fs.readdirSync(dirPath, { withFileTypes: true });\n  \n  for (const entry of entries) {\n    const fullPath = path.join(dirPath, entry.name);\n    const zipEntryPath = path.join(zipPath, entry.name);\n    \n    if (entry.isDirectory()) {\n      addDirectoryToZip(fullPath, zipEntryPath);\n    } else {\n      zip.addLocalFile(fullPath, zipPath);\n      console.log(`Added to ZIP: ${zipEntryPath}`);\n    }\n  }\n}\n\naddDirectoryToZip(tempDir);\n\n// Write ZIP file\nzip.writeZip(outputPath);\n\n// Get file stats\nconst stats = fs.statSync(outputPath);\nconst fileCount = items.length;\n\nconsole.log(`Created ZIP: ${outputPath} (${stats.size} bytes, ${fileCount} files)`);\n\n// Cleanup temp directory\ntry {\n  fs.rmSync(tempDir, { recursive: true, force: true });\n  console.log(`Cleaned up temp directory: ${tempDir}`);\n} catch (error) {\n  console.error(`Failed to cleanup temp directory: ${error.message}`);\n}\n\nreturn [{\n  json: {\n    jobId: jobId,\n    zipPath: outputPath,\n    zipSize: stats.size,\n    fileCount: fileCount,\n    completed: true\n  }\n}];"
-      },
-      "id": "create-zip",
+      "id": "e1f2a3b4-c5d6-7890-4567-89abcdef0123",
       "name": "Create ZIP Archive",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2000, 300]
+      "position": [2260, 400]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=UPDATE processing_jobs SET source_zip_path = '{{ $json.zipPath }}', source_file_count = {{ $json.fileCount }}, source_total_size = {{ $json.zipSize }}, status = 'downloaded', current_phase = 'downloaded' WHERE id = '{{ $json.jobId }}' RETURNING *;",
+        "query": "UPDATE processing_jobs \nSET source_zip_path = '{{ $json.zipPath }}', \n    source_file_count = {{ $json.fileCount }},\n    source_total_size = {{ $json.totalSize }},\n    status = 'downloaded',\n    current_phase = 'downloaded'\nWHERE id = '{{ $json.jobId }}'\nRETURNING id, source_zip_path, source_file_count, status;",
         "options": {}
       },
-      "id": "update-job-status",
+      "id": "f2a3b4c5-d6e7-8901-5678-9abcdef01234",
       "name": "Update Job Status",
       "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [2220, 300],
+      "typeVersion": 2.5,
+      "position": [2480, 400],
       "credentials": {
         "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
         }
       }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.N8N_WEBHOOK_URL }}/webhook/trigger-processing",
+        "url": "=http://{{ $env.N8N_HOST || 'localhost' }}:{{ $env.N8N_PORT || '5678' }}/webhook/download-complete",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
             {
-              "name": "jobId",
+              "name": "event",
+              "value": "download_complete"
+            },
+            {
+              "name": "job_id",
               "value": "={{ $json.id }}"
             },
             {
-              "name": "zipPath",
-              "value": "={{ $json.source_zip_path }}"
+              "name": "zip_path",
+              "value": "={{ $('Create ZIP Archive').first().json.zipPath }}"
             },
             {
-              "name": "fileCount",
-              "value": "={{ $json.source_file_count }}"
+              "name": "file_count",
+              "value": "={{ $('Create ZIP Archive').first().json.fileCount }}"
             }
           ]
         },
-        "options": {}
+        "options": {
+          "timeout": 10000
+        }
       },
-      "id": "trigger-processing",
+      "id": "a3b4c5d6-e7f8-9012-6789-abcdef012345",
       "name": "Trigger Processing Workflow",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2440, 300]
+      "position": [2700, 400]
     },
     {
       "parameters": {
-        "jsCode": "// Return final result\nconst item = $input.first();\n\nreturn [{\n  json: {\n    success: true,\n    jobId: item.json.id,\n    message: `Successfully downloaded and created ZIP for job ${item.json.id}`,\n    zipPath: item.json.source_zip_path,\n    fileCount: item.json.source_file_count,\n    status: item.json.status\n  }\n}];"
+        "jsCode": "// Return final result\nconst zipInfo = $('Create ZIP Archive').first().json;\nconst jobInfo = $('Update Job Status').first().json;\n\nreturn [\n  {\n    json: {\n      success: true,\n      jobId: jobInfo.id,\n      zipPath: zipInfo.zipPath,\n      fileCount: zipInfo.fileCount,\n      totalSize: zipInfo.totalSize,\n      message: `Successfully downloaded ${zipInfo.fileCount} files to ${zipInfo.zipPath}`\n    }\n  }\n];"
       },
-      "id": "return-result",
+      "id": "b4c5d6e7-f8a9-0123-789a-bcdef0123456",
       "name": "Return Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2660, 300]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "string": [
-            {
-              "value1": "={{ $json.error }}",
-              "operation": "isNotEmpty"
-            }
-          ]
-        }
-      },
-      "id": "check-error",
-      "name": "Check for Errors",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [900, 480]
+      "position": [2920, 400]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=UPDATE processing_jobs SET status = 'failed', error_message = '{{ $json.error }}', current_phase = 'downloading' WHERE id = '{{ $json.jobId }}';",
+        "query": "UPDATE processing_jobs \nSET status = 'failed',\n    error_message = '{{ $json.error || \"Unknown error during download\" }}'\nWHERE id = '{{ $('Create Processing Job').first().json.id }}';",
         "options": {}
       },
-      "id": "mark-job-failed",
-      "name": "Mark Job Failed",
+      "id": "c5d6e7f8-a9b0-1234-89ab-cdef01234567",
+      "name": "Update Job Failed",
       "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [1120, 580],
+      "typeVersion": 2.5,
+      "position": [2040, 600],
       "credentials": {
         "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-error-check",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d6e7f8a9-b0c1-2345-9abc-def012345678",
+      "name": "Check For Errors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1820, 600]
     }
   ],
   "connections": {
-    "Manual/Schedule Trigger": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
       "main": [
         [
           {
@@ -276,6 +347,17 @@
       "main": [
         [
           {
+            "node": "Prepare Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Request": {
+      "main": [
+        [
+          {
             "node": "List Folder Contents",
             "type": "main",
             "index": 0
@@ -287,30 +369,36 @@
       "main": [
         [
           {
-            "node": "Build Complete File List",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Check for Errors",
+            "node": "Build File List",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Build Complete File List": {
+    "Build File List": {
       "main": [
         [
           {
-            "node": "Split Into Batches",
+            "node": "Split Files",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Split Into Batches": {
+    "Split Files": {
+      "main": [
+        [
+          {
+            "node": "Batch Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Files": {
       "main": [
         [
           {
@@ -332,18 +420,7 @@
       "main": [
         [
           {
-            "node": "Save File to Temp",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Save File to Temp": {
-      "main": [
-        [
-          {
-            "node": "Split Into Batches",
+            "node": "Batch Files",
             "type": "main",
             "index": 0
           }
@@ -354,7 +431,23 @@
       "main": [
         [
           {
+            "node": "Check For Errors",
+            "type": "main",
+            "index": 0
+          },
+          {
             "node": "Update Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check For Errors": {
+      "main": [
+        [
+          {
+            "node": "Update Job Failed",
             "type": "main",
             "index": 0
           }
@@ -382,33 +475,24 @@
           }
         ]
       ]
-    },
-    "Check for Errors": {
-      "main": [
-        [
-          {
-            "node": "Mark Job Failed",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
   },
   "staticData": null,
   "tags": [
     {
-      "createdAt": "2024-01-01T00:00:00.000Z",
-      "updatedAt": "2024-01-01T00:00:00.000Z",
-      "id": "1",
       "name": "Document Organizer"
+    },
+    {
+      "name": "Cloud Integration"
     }
   ],
+  "triggerCount": 2,
   "pinData": {},
-  "meta": {
-    "instanceId": "doc-organizer-n8n"
-  }
+  "versionId": "1.0.0"
 }
