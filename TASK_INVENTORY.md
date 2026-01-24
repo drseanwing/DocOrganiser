@@ -4,7 +4,7 @@
 
 This document provides a comprehensive breakdown of all tasks required for full implementation of the DocOrganiser system, following the **Ralph Principle** for task scope: each task is granular enough that it can be described without using the word "and".
 
-**Last Updated**: 2026-01-24
+**Last Updated**: 2026-01-24 (Added Utility Extraction, Parallel Processing, Resume Capability sections)
 
 ---
 
@@ -24,7 +24,10 @@ This document provides a comprehensive breakdown of all tasks required for full 
 | Testing | 14 | 14 | 0 | 0 |
 | Documentation | 10 | 10 | 0 | 0 |
 | DevOps/Deployment | 8 | 8 | 0 | 0 |
-| **TOTAL** | **128** | **125** | **3** | **0** |
+| Utility Extraction | 17 | 0 | 0 | 17 |
+| Parallel Processing | 12 | 0 | 0 | 12 |
+| Resume Capability | 13 | 0 | 0 | 13 |
+| **TOTAL** | **170** | **125** | **3** | **42** |
 
 **Legend:**
 - ✅ Completed: Fully implemented in dedicated files
@@ -261,22 +264,133 @@ This document provides a comprehensive breakdown of all tasks required for full 
 
 ---
 
+## 13. Utility Extraction
+
+Extracting inline utility functions from agents into dedicated reusable modules for improved maintainability and testability.
+
+### 13.1 Hashing Utilities
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| UTIL-010 | Create hashing.py module structure | ❌ Not Started | `src/utils/hashing.py` |
+| UTIL-011 | Implement hash_file function for SHA256 file hashing | ❌ Not Started | `src/utils/hashing.py` |
+| UTIL-012 | Implement hash_content function for SHA256 content hashing | ❌ Not Started | `src/utils/hashing.py` |
+
+### 13.2 File Utilities
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| UTIL-013 | Create file_utils.py module structure | ❌ Not Started | `src/utils/file_utils.py` |
+| UTIL-014 | Implement walk_directory function for recursive file discovery | ❌ Not Started | `src/utils/file_utils.py` |
+| UTIL-015 | Implement filter_by_extension function for extension filtering | ❌ Not Started | `src/utils/file_utils.py` |
+| UTIL-016 | Implement filter_by_size function for file size filtering | ❌ Not Started | `src/utils/file_utils.py` |
+| UTIL-017 | Implement get_relative_path function for path normalization | ❌ Not Started | `src/utils/file_utils.py` |
+| UTIL-018 | Implement normalize_path function for cross-platform paths | ❌ Not Started | `src/utils/file_utils.py` |
+
+### 13.3 String Utilities
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| UTIL-019 | Create string_utils.py module structure | ❌ Not Started | `src/utils/string_utils.py` |
+| UTIL-020 | Implement levenshtein_similarity function wrapper | ❌ Not Started | `src/utils/string_utils.py` |
+| UTIL-021 | Implement extract_version_info function from filenames | ❌ Not Started | `src/utils/string_utils.py` |
+| UTIL-022 | Implement clean_filename function for sanitization | ❌ Not Started | `src/utils/string_utils.py` |
+
+### 13.4 Agent Refactoring
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| UTIL-023 | Refactor IndexAgent to use extracted hashing utilities | ❌ Not Started | `src/agents/index_agent.py` |
+| UTIL-024 | Refactor IndexAgent to use extracted file utilities | ❌ Not Started | `src/agents/index_agent.py` |
+| UTIL-025 | Refactor VersionAgent to use extracted string utilities | ❌ Not Started | `src/agents/version_agent.py` |
+| UTIL-026 | Refactor main.py to use extracted hashing utilities | ❌ Not Started | `src/main.py` |
+
+---
+
+## 14. Parallel File Processing
+
+Implementing scalable parallel file processing for improved performance when handling large directories with thousands of files.
+
+### 14.1 Core Infrastructure
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| PARALLEL-001 | Create async_batch_processor.py module structure | ❌ Not Started | `src/utils/async_batch_processor.py` |
+| PARALLEL-002 | Implement AsyncBatchProcessor class with configurable concurrency | ❌ Not Started | `src/utils/async_batch_processor.py` |
+| PARALLEL-003 | Implement semaphore-based concurrency limiting | ❌ Not Started | `src/utils/async_batch_processor.py` |
+| PARALLEL-004 | Implement progress tracking for parallel batch operations | ❌ Not Started | `src/utils/async_batch_processor.py` |
+| PARALLEL-005 | Implement error aggregation for parallel operations | ❌ Not Started | `src/utils/async_batch_processor.py` |
+| PARALLEL-006 | Implement batch result collection with typed responses | ❌ Not Started | `src/utils/async_batch_processor.py` |
+
+### 14.2 Configuration
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| PARALLEL-007 | Add parallel_workers setting to Settings class | ❌ Not Started | `src/config.py` |
+| PARALLEL-008 | Add parallel_chunk_size setting to Settings class | ❌ Not Started | `src/config.py` |
+
+### 14.3 Agent Integration
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| PARALLEL-009 | Refactor IndexAgent to use AsyncBatchProcessor | ❌ Not Started | `src/agents/index_agent.py` |
+| PARALLEL-010 | Refactor DedupAgent to use AsyncBatchProcessor | ❌ Not Started | `src/agents/dedup_agent.py` |
+| PARALLEL-011 | Refactor VersionAgent to use AsyncBatchProcessor | ❌ Not Started | `src/agents/version_agent.py` |
+
+### 14.4 Testing
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| PARALLEL-012 | Create unit tests for AsyncBatchProcessor | ❌ Not Started | `tests/test_async_batch_processor.py` |
+
+---
+
+## 15. Resume Capability
+
+Adding checkpoint-based resume functionality to recover from interrupted processing runs without reprocessing completed work.
+
+### 15.1 Checkpoint Infrastructure
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| RESUME-001 | Create checkpoint_manager.py module structure | ❌ Not Started | `src/utils/checkpoint_manager.py` |
+| RESUME-002 | Implement CheckpointManager class with state tracking | ❌ Not Started | `src/utils/checkpoint_manager.py` |
+| RESUME-003 | Implement checkpoint creation after phase completion | ❌ Not Started | `src/utils/checkpoint_manager.py` |
+| RESUME-004 | Implement checkpoint serialization to database | ❌ Not Started | `src/utils/checkpoint_manager.py` |
+| RESUME-005 | Implement checkpoint loading from database | ❌ Not Started | `src/utils/checkpoint_manager.py` |
+| RESUME-006 | Implement checkpoint validation logic | ❌ Not Started | `src/utils/checkpoint_manager.py` |
+
+### 15.2 Orchestrator Integration
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| RESUME-007 | Add resume_from_checkpoint parameter to DocumentOrganizer | ❌ Not Started | `src/main.py` |
+| RESUME-008 | Implement automatic phase skip detection from checkpoint state | ❌ Not Started | `src/main.py` |
+| RESUME-009 | Implement partial batch progress checkpointing | ❌ Not Started | `src/main.py` |
+| RESUME-010 | Implement checkpoint cleanup after successful completion | ❌ Not Started | `src/main.py` |
+
+### 15.3 CLI Support
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| RESUME-011 | Add --resume flag to CLI argument parser | ❌ Not Started | `src/main.py` |
+| RESUME-012 | Implement resume workflow in main() function | ❌ Not Started | `src/main.py` |
+
+### 15.4 Testing
+| Task ID | Description | Status | File |
+|---------|-------------|--------|------|
+| RESUME-013 | Create unit tests for CheckpointManager | ❌ Not Started | `tests/test_checkpoint_manager.py` |
+
+---
+
 ## Future Enhancements (Not Started)
 
 These are planned enhancements mentioned in the documentation but not yet implemented:
 
 | Task ID | Description | Priority | Status |
 |---------|-------------|----------|--------|
-| FUTURE-001 | Implement parallel file processing | Medium | ❌ Not Started |
-| FUTURE-002 | Implement resume capability from checkpoints | Medium | ❌ Not Started |
-| FUTURE-003 | Implement incremental execution for changed files only | Low | ❌ Not Started |
-| FUTURE-004 | Implement content hash verification after copy | Low | ❌ Not Started |
-| FUTURE-005 | Implement Microsoft Graph API direct integration | Medium | ❌ Not Started |
-| FUTURE-006 | Implement batch processing for large file inventories (>500 files) | Medium | ❌ Not Started |
-| FUTURE-007 | Implement user preference learning from corrections | Low | ❌ Not Started |
-| FUTURE-008 | Implement preview mode for organization plans | Low | ❌ Not Started |
-| FUTURE-009 | Implement support for alternative LLMs (GPT-4, Gemini) | Low | ❌ Not Started |
-| FUTURE-010 | Implement hardlink deduplication for identical files | Low | ❌ Not Started |
+| FUTURE-001 | Implement incremental execution for changed files only | Low | ❌ Not Started |
+| FUTURE-002 | Implement content hash verification after copy | Low | ❌ Not Started |
+| FUTURE-003 | Implement Microsoft Graph API direct integration | Medium | ❌ Not Started |
+| FUTURE-004 | Implement batch processing for large file inventories (>500 files) | Medium | ❌ Not Started |
+| FUTURE-005 | Implement user preference learning from corrections | Low | ❌ Not Started |
+| FUTURE-006 | Implement preview mode for organization plans | Low | ❌ Not Started |
+| FUTURE-007 | Implement support for alternative LLMs (GPT-4, Gemini) | Low | ❌ Not Started |
+| FUTURE-008 | Implement hardlink deduplication for identical files | Low | ❌ Not Started |
+
+**Note**: The following items from the original Future Enhancements list have been promoted to dedicated sections with detailed granular task breakdowns:
+- Parallel file processing → Section 14
+- Resume capability from checkpoints → Section 15
+- Utility extraction (inline utility refactoring) → Section 13
 
 ---
 
@@ -295,11 +409,16 @@ Utilities Module:        ██████████████████�
 Testing:                 ████████████████████ 100% (14/14)
 Documentation:           ████████████████████ 100% (10/10)
 DevOps/Deployment:       ████████████████████ 100% (8/8)
+Utility Extraction:      ░░░░░░░░░░░░░░░░░░░░   0% (0/17)
+Parallel Processing:     ░░░░░░░░░░░░░░░░░░░░   0% (0/12)
+Resume Capability:       ░░░░░░░░░░░░░░░░░░░░   0% (0/13)
 
-OVERALL COMPLETION:      ████████████████████ 100% (128/128 functional)
+CORE COMPLETION:         ████████████████████ 100% (128/128 functional)
+NEW FEATURES:            ░░░░░░░░░░░░░░░░░░░░   0% (0/42 planned)
+OVERALL:                 ███████████████░░░░░  75% (128/170 total)
 ```
 
-**Note**: All tasks are now complete! "Inline" implementations are counted as functional.
+**Note**: Core implementation is complete! New enhancement features (utility extraction, parallel processing, resume capability) have been planned with detailed task breakdowns.
 
 ---
 
@@ -318,18 +437,38 @@ The following components are fully implemented and ready for use:
 
 ### Gaps Requiring Attention
 
-All core tasks are now complete! Only optional future enhancements remain.
+While core functionality is complete, the following enhancement areas have been planned:
+
+1. **Utility Extraction (Section 13)** - 17 tasks to extract inline utilities for better reusability
+2. **Parallel Processing (Section 14)** - 12 tasks to implement scalable concurrent processing
+3. **Resume Capability (Section 15)** - 13 tasks to enable checkpoint-based recovery
 
 ---
 
 ## Recommended Next Steps
 
-All core implementation tasks are now complete! Consider these optional enhancements:
+All core implementation tasks are complete! The following enhancement features are planned with detailed task breakdowns:
 
-1. **Extract inline utility functions** to dedicated modules for reusability (optional refactoring)
-2. **Implement parallel file processing** for improved performance on large directories
-3. **Add resume capability** for interrupted processing runs
-4. **Implement batch processing** for file inventories exceeding 500 files
+### Priority 1: Utility Extraction (Section 13)
+Extract inline utility functions to dedicated modules for improved maintainability:
+- Start with hashing utilities (UTIL-010 through UTIL-012)
+- Then file utilities (UTIL-013 through UTIL-018)
+- Then string utilities (UTIL-019 through UTIL-022)
+- Finally refactor agents to use new utilities (UTIL-023 through UTIL-026)
+
+### Priority 2: Parallel File Processing (Section 14)
+Implement scalable parallel processing for large directories:
+- Create AsyncBatchProcessor infrastructure (PARALLEL-001 through PARALLEL-006)
+- Add configuration options (PARALLEL-007, PARALLEL-008)
+- Integrate with agents (PARALLEL-009 through PARALLEL-011)
+- Add testing (PARALLEL-012)
+
+### Priority 3: Resume Capability (Section 15)
+Add checkpoint-based recovery for interrupted processing:
+- Build CheckpointManager infrastructure (RESUME-001 through RESUME-006)
+- Integrate with orchestrator (RESUME-007 through RESUME-010)
+- Add CLI support (RESUME-011, RESUME-012)
+- Add testing (RESUME-013)
 
 ---
 
