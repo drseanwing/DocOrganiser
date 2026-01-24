@@ -18,7 +18,6 @@ from contextlib import asynccontextmanager
 import structlog
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from src.config import Settings, get_settings, ProcessingPhase
 

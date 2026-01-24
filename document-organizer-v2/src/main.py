@@ -13,7 +13,6 @@ Coordinates the processing pipeline:
 
 import asyncio
 import argparse
-import sys
 import os
 import zipfile
 import shutil
@@ -355,7 +354,6 @@ class DocumentOrganizer:
     
     async def _package_output(self) -> str:
         """Package working directory into output ZIP."""
-        working_dir = Path(self.settings.data_working_path)
         output_dir = Path(self.settings.data_output_path)
         output_dir.mkdir(parents=True, exist_ok=True)
         
