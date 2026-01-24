@@ -47,9 +47,15 @@ htmlcov/
 *.log
 logs/
 
-# OS
-.DS_Store
-Thumbs.db
+# Database
+*.db
+*.sqlite
+*.sqlite3
 
 # Data directories (for local development)
 /data/
+data/
+
+# OS
+.DS_Store
+Thumbs.db

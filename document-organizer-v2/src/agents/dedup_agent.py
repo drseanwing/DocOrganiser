@@ -8,14 +8,12 @@ Phase 2 of the processing pipeline:
 4. Record decisions for execution phase
 """
 
-import asyncio
 from datetime import datetime
 from typing import Optional
-from pathlib import Path
 
 from sqlalchemy import text
 
-from src.config import ProcessingPhase, DuplicateAction, get_settings
+from src.config import ProcessingPhase, DuplicateAction
 from src.agents.base_agent import BaseAgent, AgentResult
 from src.services.ollama_service import OllamaService
 
