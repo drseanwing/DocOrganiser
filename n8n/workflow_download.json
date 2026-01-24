@@ -219,7 +219,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:5678/webhook/download-complete",
+        "url": "=http://{{ $env.N8N_HOST || 'localhost' }}:{{ $env.N8N_PORT || '5678' }}/webhook/download-complete",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [

@@ -355,7 +355,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:5678/webhook/processing-complete",
+        "url": "=http://{{ $env.N8N_HOST || 'localhost' }}:{{ $env.N8N_PORT || '5678' }}/webhook/processing-complete",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"event\": \"processing_complete\",\n  \"job_id\": \"{{ $('Parse Payload').first().json.jobId }}\",\n  \"output_path\": \"{{ $('Parse Payload').first().json.outputPath }}\",\n  \"stats\": {{ JSON.stringify($('Parse Payload').first().json.stats) }}\n}",

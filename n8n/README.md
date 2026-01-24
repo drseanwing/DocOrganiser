@@ -172,6 +172,13 @@ Configure these environment variables in n8n:
 |----------|-------------|---------|
 | `AUTO_APPROVE_REVIEW` | Auto-approve reviews | `true` or `false` |
 
+### n8n Internal Configuration
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `N8N_HOST` | Hostname for n8n server (for internal webhooks) | `n8n` or `localhost` |
+| `N8N_PORT` | Port for n8n server | `5678` |
+
 ## Setting Environment Variables in n8n
 
 ### Docker
