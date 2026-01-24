@@ -10,7 +10,6 @@ Phase 1 of the processing pipeline:
 6. Store everything in document_items table
 """
 
-import hashlib
 import asyncio
 from pathlib import Path
 from datetime import datetime
@@ -23,6 +22,8 @@ from src.config import ProcessingPhase
 from src.agents.base_agent import BaseAgent, AgentResult
 from src.services.ollama_service import OllamaService
 from src.extractors import get_extractor
+from src.utils.hashing import hash_file, hash_string_md5
+from src.utils.file_utils import walk_directory, filter_by_extension, filter_by_size
 
 
 class IndexAgent(BaseAgent):
@@ -138,39 +139,19 @@ class IndexAgent(BaseAgent):
         Walk directory tree and yield file paths.
         
         Respects configuration for supported extensions and max file size.
+        Uses extracted file utilities for consistency.
         """
-        files = []
-        supported_ext = set(self.settings.supported_extensions)
+        supported_ext = set(self.settings.supported_extensions) if self.settings.supported_extensions else None
         
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            
-            # Skip hidden files and system files
-            if path.name.startswith('.') or path.name.startswith('~'):
-                continue
-            
-            # Check extension
-            ext = path.suffix.lower().lstrip('.')
-            if supported_ext and ext not in supported_ext:
-                self.logger.debug("skipping_unsupported_extension", 
-                                 path=str(path), extension=ext)
-                continue
-            
-            # Check file size
-            try:
-                size = path.stat().st_size
-                if size > self.settings.max_file_size_bytes:
-                    self.logger.debug("skipping_large_file", 
-                                     path=str(path), 
-                                     size_mb=size / (1024*1024))
-                    continue
-            except OSError:
-                continue
-            
-            files.append(path)
+        # Use utility functions for file discovery and filtering
+        files = walk_directory(root, include_hidden=False)
         
-        return files
+        if supported_ext:
+            files = filter_by_extension(files, extensions=supported_ext)
+        
+        files = filter_by_size(files, max_size=self.settings.max_file_size_bytes)
+        
+        return list(files)
     
     async def _process_file_with_semaphore(
         self, 
@@ -271,14 +252,8 @@ class IndexAgent(BaseAgent):
                             error=str(e))
     
     def _calculate_hash(self, file_path: Path) -> str:
-        """Calculate SHA256 hash of file content."""
-        sha256 = hashlib.sha256()
-        
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(8192), b''):
-                sha256.update(chunk)
-        
-        return sha256.hexdigest()
+        """Calculate SHA256 hash of file content using utility function."""
+        return hash_file(file_path)
     
     def _check_exists_in_db(self, content_hash: str) -> bool:
         """Check if a file with this hash already exists in the database."""
@@ -370,8 +345,8 @@ Respond ONLY with the JSON, no other text."""
         session = self.get_sync_session()
         
         try:
-            # Generate a unique file_id from path (since we don't have OneDrive IDs)
-            file_id = hashlib.md5(relative_path.encode()).hexdigest()
+            # Generate a unique file_id from path using utility function
+            file_id = hash_string_md5(relative_path)
             
             session.execute(
                 text("""

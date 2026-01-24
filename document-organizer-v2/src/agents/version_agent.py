@@ -15,34 +15,22 @@ from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
 from typing import Optional, List, Dict, Any, Tuple
-from Levenshtein import ratio as levenshtein_ratio
 
 from sqlalchemy import text
 
 from src.config import ProcessingPhase, VersionArchiveStrategy, get_settings
 from src.agents.base_agent import BaseAgent, AgentResult
 from src.services.ollama_service import OllamaService
-
-
-# Version detection patterns
-VERSION_PATTERNS = [
-    (r'_v(\d+)', 'version_number'),           # _v1, _v2
-    (r'_rev(\d+)', 'revision_number'),        # _rev1, _rev2  
-    (r'_version(\d+)', 'version_number'),     # _version1
-    (r'\s*\((\d+)\)', 'copy_number'),         # (1), (2)
-    (r'_(\d{4}-\d{2}-\d{2})', 'date'),        # _2024-01-15
-    (r'_(\d{8})', 'date_compact'),            # _20240115
-    (r'_(draft|final|approved|review|wip)', 'status'),
-]
-
-# Status priority for sorting (lower = older)
-STATUS_PRIORITY = {
-    'draft': 1,
-    'wip': 2,
-    'review': 3,
-    'approved': 4,
-    'final': 5
-}
+from src.utils.string_utils import (
+    levenshtein_similarity,
+    extract_version_info,
+    extract_common_prefix,
+    clean_base_name,
+    extract_base_from_name,
+    get_status_priority,
+    VERSION_PATTERNS,
+    STATUS_PRIORITY,
+)
 
 
 class VersionAgent(BaseAgent):
@@ -178,34 +166,6 @@ class VersionAgent(BaseAgent):
                 duration_seconds=duration
             )
     
-    def _extract_version_info(self, filename: str) -> Tuple[str, Optional[Dict]]:
-        """
-        Extract version marker from filename.
-        
-        Args:
-            filename: Filename without extension
-            
-        Returns:
-            Tuple of (base_name_without_marker, version_info_dict or None)
-            
-        Example:
-            "Budget_v2" → ("Budget", {"type": "version_number", "value": "2"})
-            "Report_2024-01-15" → ("Report", {"type": "date", "value": "2024-01-15"})
-        """
-        for pattern, version_type in VERSION_PATTERNS:
-            match = re.search(pattern, filename, re.IGNORECASE)
-            if match:
-                # Extract the base name by removing the matched pattern
-                base_name = re.sub(pattern, '', filename, flags=re.IGNORECASE).strip('_- ')
-                version_info = {
-                    "type": version_type,
-                    "value": match.group(1),
-                    "marker": match.group(0)
-                }
-                return base_name, version_info
-        
-        return filename, None
-    
     async def _find_explicit_versions(self) -> List[Dict]:
         """
         Find files with explicit version markers, grouped by base name + directory.
@@ -238,7 +198,7 @@ class VersionAgent(BaseAgent):
             for file in files:
                 # Remove extension from name
                 name_without_ext = Path(file['current_name']).stem
-                base_name, version_info = self._extract_version_info(name_without_ext)
+                base_name, version_info = extract_version_info(name_without_ext)
                 
                 # Only include files with version markers
                 if version_info:
@@ -335,9 +295,9 @@ class VersionAgent(BaseAgent):
                         if file1['content_hash'] == file2['content_hash']:
                             continue
                         
-                        # Check name similarity
+                        # Check name similarity using utility function
                         name2 = Path(file2['current_name']).stem.lower()
-                        similarity = levenshtein_ratio(name1, name2)
+                        similarity = levenshtein_similarity(name1, name2)
                         
                         if similarity >= threshold:
                             similar_files.append(file2)
@@ -368,6 +328,7 @@ class VersionAgent(BaseAgent):
     def _extract_common_name(self, names: List[str]) -> str:
         """
         Extract the common base name from a list of similar names.
+        Uses utility functions for consistency.
         
         Args:
             names: List of file names (without extension)
@@ -381,42 +342,17 @@ class VersionAgent(BaseAgent):
         if len(names) == 1:
             return names[0]
         
-        # Find the longest common prefix
-        common = self._find_common_prefix(names)
+        # Find the longest common prefix using utility function
+        common = extract_common_prefix(names)
         
-        # Clean up the common name
-        common = self._clean_common_name(common)
+        # Clean up the common name using utility function
+        common = clean_base_name(common)
         
-        # If too short, extract base from first name
+        # If too short, extract base from first name using utility function
         if len(common) < 3:
-            common = self._extract_base_from_name(names[0])
+            common = extract_base_from_name(names[0])
         
         return common or "document"
-    
-    def _find_common_prefix(self, names: List[str]) -> str:
-        """Find the longest common prefix from a list of names."""
-        common = names[0]
-        for name in names[1:]:
-            new_common = ""
-            for c1, c2 in zip(common, name):
-                if c1.lower() == c2.lower():
-                    new_common += c1
-                else:
-                    break
-            common = new_common
-        return common
-    
-    def _clean_common_name(self, name: str) -> str:
-        """Clean up common name by removing trailing punctuation."""
-        return name.strip('_- ()')
-    
-    def _extract_base_from_name(self, name: str) -> str:
-        """Extract base name by removing version markers and parenthetical suffixes."""
-        # Remove parenthetical suffixes like " (1)", " (revised)"
-        base = re.sub(r'[_\-\s]*\([^)]*\)$', '', name)
-        # Remove common version markers
-        base = re.sub(r'[_\-\s]*(v|version|rev|draft|final)\d*$', '', base, flags=re.IGNORECASE)
-        return base.strip('_- ')
     
     async def _process_version_group(self, group: Dict):
         """
@@ -604,9 +540,9 @@ REASONING: <your explanation>"""
                 except:
                     pass
             
-            # Priority 3: Status markers
+            # Priority 3: Status markers (using utility function)
             if version_type == 'status':
-                status_rank = STATUS_PRIORITY.get(version_value.lower(), 99)
+                status_rank = get_status_priority(version_value)
                 return (3, status_rank, 0, file.get('source_modified_at', datetime.min))
             
             # Priority 4: Modification date fallback

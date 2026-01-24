@@ -30,6 +30,7 @@ from src.agents.dedup_agent import DedupAgent
 from src.agents.version_agent import VersionAgent
 from src.agents.organize_agent import OrganizeAgent
 from src.execution.execution_engine import ExecutionEngine
+from src.utils.hashing import hash_file
 
 
 # Configure logging
@@ -185,14 +186,8 @@ class DocumentOrganizer:
     
     async def _create_job(self, zip_path: str) -> str:
         """Create a new processing job record."""
-        import hashlib
-        
-        # Calculate ZIP hash
-        sha256 = hashlib.sha256()
-        with open(zip_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(8192), b''):
-                sha256.update(chunk)
-        zip_hash = sha256.hexdigest()
+        # Calculate ZIP hash using utility function
+        zip_hash = hash_file(zip_path)
         
         zip_size = os.path.getsize(zip_path)
         
