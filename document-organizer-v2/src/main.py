@@ -29,6 +29,7 @@ from src.agents.index_agent import IndexAgent
 from src.agents.dedup_agent import DedupAgent
 # from src.agents.version_agent import VersionAgent  # TODO: Implement
 # from src.agents.organize_agent import OrganizeAgent  # TODO: Implement
+from src.execution.execution_engine import ExecutionEngine
 
 
 # Configure logging
