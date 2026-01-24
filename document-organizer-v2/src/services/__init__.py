@@ -11,5 +11,5 @@ from src.services.claude_service import ClaudeService
 
 __all__ = [
     "OllamaService",
-    "ClaudeService"
+    "ClaudeService",
 ]
