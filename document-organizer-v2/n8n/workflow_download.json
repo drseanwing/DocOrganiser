@@ -1,0 +1,414 @@
+{
+  "name": "DocOrg - Download from Cloud",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual/Schedule Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://login.microsoftonline.com/{{ $env.MS_TENANT_ID }}/oauth2/v2.0/token",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $env.MS_CLIENT_ID }}"
+            },
+            {
+              "name": "scope",
+              "value": "https://graph.microsoft.com/.default"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.MS_CLIENT_SECRET }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-oauth-token",
+      "name": "Get OAuth Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_jobs (source_type, source_path, status, current_phase) VALUES ('{{ $env.SOURCE_TYPE }}', '{{ $env.SOURCE_PATH }}', 'downloading', 'downloading') RETURNING id, created_at;",
+        "options": {}
+      },
+      "id": "create-job",
+      "name": "Create Processing Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "Document Organizer DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SOURCE_TYPE === 'onedrive' ? 'https://graph.microsoft.com/v1.0/me/drive/root:/' + $env.SOURCE_PATH + ':/children' : 'https://graph.microsoft.com/v1.0/sites/' + $env.SOURCE_SITE_ID + '/drive/root:/' + $env.SOURCE_PATH + ':/children' }}",
+        "authentication": "genericCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "pagination": true,
+          "paginationCompleteExpression": "={{ !$response.body['@odata.nextLink'] }}",
+          "paginationUrl": "={{ $response.body['@odata.nextLink'] }}"
+        }
+      },
+      "id": "list-folder-root",
+      "name": "List Folder Contents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build complete file list from recursive folder listing\nconst items = $input.all();\nconst accessToken = items[0].json.access_token;\nconst jobId = items[0].json.id;\n\nconst files = [];\nconst folders = [];\n\n// Process initial items\nfor (const item of items) {\n  if (item.json.value) {\n    for (const entry of item.json.value) {\n      if (entry.folder) {\n        folders.push({\n          id: entry.id,\n          name: entry.name,\n          path: entry.parentReference.path + '/' + entry.name\n        });\n      } else if (entry.file) {\n        files.push({\n          id: entry.id,\n          name: entry.name,\n          path: entry.parentReference.path,\n          size: entry.size,\n          downloadUrl: entry['@microsoft.graph.downloadUrl'],\n          jobId: jobId,\n          accessToken: accessToken\n        });\n      }\n    }\n  }\n}\n\n// Recursive function to fetch folder contents\nconst fetchFolderContents = async (folderId) => {\n  const sourceType = $env.SOURCE_TYPE;\n  const baseUrl = sourceType === 'onedrive' \n    ? `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`\n    : `https://graph.microsoft.com/v1.0/sites/${$env.SOURCE_SITE_ID}/drive/items/${folderId}/children`;\n  \n  let url = baseUrl;\n  while (url) {\n    const response = await $http.request({\n      method: 'GET',\n      url: url,\n      headers: {\n        'Authorization': `Bearer ${accessToken}`\n      }\n    });\n    \n    for (const entry of response.value) {\n      if (entry.folder) {\n        folders.push({\n          id: entry.id,\n          name: entry.name,\n          path: entry.parentReference.path + '/' + entry.name\n        });\n      } else if (entry.file) {\n        files.push({\n          id: entry.id,\n          name: entry.name,\n          path: entry.parentReference.path,\n          size: entry.size,\n          downloadUrl: entry['@microsoft.graph.downloadUrl'],\n          jobId: jobId,\n          accessToken: accessToken\n        });\n      }\n    }\n    \n    url = response['@odata.nextLink'];\n  }\n};\n\n// Process folders recursively\nlet processedCount = 0;\nwhile (processedCount < folders.length) {\n  await fetchFolderContents(folders[processedCount].id);\n  processedCount++;\n}\n\nconsole.log(`Found ${files.length} files in ${folders.length} folders`);\n\nreturn files.map(f => ({\n  json: f\n}));"
+      },
+      "id": "build-file-list",
+      "name": "Build Complete File List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "split-in-batches",
+      "name": "Split Into Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.downloadUrl }}",
+        "authentication": "none",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-file",
+      "name": "Download File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Save downloaded file to temp directory\nconst fs = require('fs');\nconst path = require('path');\nconst crypto = require('crypto');\n\nconst item = $input.first();\nconst jobId = item.json.jobId;\nconst fileName = item.json.name;\nconst filePath = item.json.path;\nconst fileData = await item.binary.data.buffer();\n\n// Create temp directory\nconst tempDir = `/tmp/download_${jobId}`;\nif (!fs.existsSync(tempDir)) {\n  fs.mkdirSync(tempDir, { recursive: true });\n}\n\n// Create subdirectories matching source structure\nconst relativePath = filePath.replace(/^\\/drive\\/root:/, '').replace(/^:/, '');\nconst fullPath = path.join(tempDir, relativePath);\nconst dirPath = path.dirname(fullPath);\n\nif (!fs.existsSync(dirPath)) {\n  fs.mkdirSync(dirPath, { recursive: true });\n}\n\n// Save file\nconst targetPath = path.join(fullPath, fileName);\nfs.writeFileSync(targetPath, fileData);\n\nconsole.log(`Saved: ${targetPath}`);\n\nreturn [{\n  json: {\n    jobId: jobId,\n    filePath: targetPath,\n    relativePath: path.join(relativePath, fileName),\n    size: fileData.length,\n    saved: true\n  }\n}];"
+      },
+      "id": "save-file-temp",
+      "name": "Save File to Temp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create ZIP archive from downloaded files\nconst AdmZip = require('adm-zip');\nconst fs = require('fs');\nconst path = require('path');\n\nconst items = $input.all();\nconst jobId = items[0].json.jobId;\nconst tempDir = `/tmp/download_${jobId}`;\nconst outputDir = '/data/input';\nconst outputPath = path.join(outputDir, `source_${jobId}.zip`);\n\n// Ensure output directory exists\nif (!fs.existsSync(outputDir)) {\n  fs.mkdirSync(outputDir, { recursive: true });\n}\n\n// Create ZIP\nconst zip = new AdmZip();\n\n// Add all files from temp directory\nfunction addDirectoryToZip(dirPath, zipPath = '') {\n  const entries = fs.readdirSync(dirPath, { withFileTypes: true });\n  \n  for (const entry of entries) {\n    const fullPath = path.join(dirPath, entry.name);\n    const zipEntryPath = path.join(zipPath, entry.name);\n    \n    if (entry.isDirectory()) {\n      addDirectoryToZip(fullPath, zipEntryPath);\n    } else {\n      zip.addLocalFile(fullPath, zipPath);\n      console.log(`Added to ZIP: ${zipEntryPath}`);\n    }\n  }\n}\n\naddDirectoryToZip(tempDir);\n\n// Write ZIP file\nzip.writeZip(outputPath);\n\n// Get file stats\nconst stats = fs.statSync(outputPath);\nconst fileCount = items.length;\n\nconsole.log(`Created ZIP: ${outputPath} (${stats.size} bytes, ${fileCount} files)`);\n\n// Cleanup temp directory\ntry {\n  fs.rmSync(tempDir, { recursive: true, force: true });\n  console.log(`Cleaned up temp directory: ${tempDir}`);\n} catch (error) {\n  console.error(`Failed to cleanup temp directory: ${error.message}`);\n}\n\nreturn [{\n  json: {\n    jobId: jobId,\n    zipPath: outputPath,\n    zipSize: stats.size,\n    fileCount: fileCount,\n    completed: true\n  }\n}];"
+      },
+      "id": "create-zip",
+      "name": "Create ZIP Archive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE processing_jobs SET source_zip_path = '{{ $json.zipPath }}', source_file_count = {{ $json.fileCount }}, source_total_size = {{ $json.zipSize }}, status = 'downloaded', current_phase = 'downloaded' WHERE id = '{{ $json.jobId }}' RETURNING *;",
+        "options": {}
+      },
+      "id": "update-job-status",
+      "name": "Update Job Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [2220, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "Document Organizer DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/webhook/trigger-processing",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "jobId",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "name": "zipPath",
+              "value": "={{ $json.source_zip_path }}"
+            },
+            {
+              "name": "fileCount",
+              "value": "={{ $json.source_file_count }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "trigger-processing",
+      "name": "Trigger Processing Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return final result\nconst item = $input.first();\n\nreturn [{\n  json: {\n    success: true,\n    jobId: item.json.id,\n    message: `Successfully downloaded and created ZIP for job ${item.json.id}`,\n    zipPath: item.json.source_zip_path,\n    fileCount: item.json.source_file_count,\n    status: item.json.status\n  }\n}];"
+      },
+      "id": "return-result",
+      "name": "Return Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.error }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "check-error",
+      "name": "Check for Errors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 480]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE processing_jobs SET status = 'failed', error_message = '{{ $json.error }}', current_phase = 'downloading' WHERE id = '{{ $json.jobId }}';",
+        "options": {}
+      },
+      "id": "mark-job-failed",
+      "name": "Mark Job Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1120, 580],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "Document Organizer DB"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual/Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get OAuth Token": {
+      "main": [
+        [
+          {
+            "node": "Create Processing Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Processing Job": {
+      "main": [
+        [
+          {
+            "node": "List Folder Contents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Folder Contents": {
+      "main": [
+        [
+          {
+            "node": "Build Complete File List",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check for Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Complete File List": {
+      "main": [
+        [
+          {
+            "node": "Split Into Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Batches": {
+      "main": [
+        [
+          {
+            "node": "Download File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create ZIP Archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download File": {
+      "main": [
+        [
+          {
+            "node": "Save File to Temp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save File to Temp": {
+      "main": [
+        [
+          {
+            "node": "Split Into Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create ZIP Archive": {
+      "main": [
+        [
+          {
+            "node": "Update Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Job Status": {
+      "main": [
+        [
+          {
+            "node": "Trigger Processing Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Processing Workflow": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Errors": {
+      "main": [
+        [
+          {
+            "node": "Mark Job Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "1",
+      "name": "Document Organizer"
+    }
+  ],
+  "pinData": {},
+  "meta": {
+    "instanceId": "doc-organizer-n8n"
+  }
+}
