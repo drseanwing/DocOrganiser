@@ -112,12 +112,16 @@ class DocumentOrganizer:
                 await self._update_job_status(ProcessingPhase.SUMMARIZING)
                 # Summarization happens in Index Agent
             
+            # Track phase issues for final reporting
+            phase_issues = []
+            
             # Phase 4: Deduplicate
             if "dedup" not in skip_phases:
                 await self._update_job_status(ProcessingPhase.DEDUPLICATING)
                 dedup_result = await self._run_deduplication()
                 if not dedup_result.success:
                     logger.warning("dedup_issues", error=dedup_result.error)
+                    phase_issues.append(("deduplication", dedup_result.error))
             
             # Phase 5: Version control
             if "version" not in skip_phases:
@@ -125,6 +129,7 @@ class DocumentOrganizer:
                 version_result = await self._run_versioning()
                 if not version_result.success:
                     logger.warning("version_issues", error=version_result.error)
+                    phase_issues.append(("versioning", version_result.error))
             
             # Phase 6: Organization planning
             if "organize" not in skip_phases:
@@ -132,6 +137,7 @@ class DocumentOrganizer:
                 organize_result = await self._run_organization()
                 if not organize_result.success:
                     logger.warning("organize_issues", error=organize_result.error)
+                    phase_issues.append(("organization", organize_result.error))
             
             # Phase 7: Review required?
             if self.settings.review_required:
@@ -158,11 +164,19 @@ class DocumentOrganizer:
             # Complete
             await self._update_job_status(ProcessingPhase.COMPLETED)
             
-            return {
+            result = {
                 "status": "completed",
                 "job_id": self.job_id,
                 "output_path": output_path
             }
+            
+            # Include any phase issues in the result
+            if phase_issues:
+                result["warnings"] = phase_issues
+                logger.info("completed_with_warnings", 
+                           phases_with_issues=[p[0] for p in phase_issues])
+            
+            return result
             
         except Exception as e:
             logger.error("processing_failed", error=str(e))
@@ -377,9 +391,16 @@ class DocumentOrganizer:
         
         # Package the working directory where execution put the reorganized files
         working_dir = Path(self.settings.data_working_path)
+        source_dir = Path(self.settings.data_source_path)
+        
         if not working_dir.exists() or not any(working_dir.iterdir()):
-            # Fallback to source if no working directory
-            working_dir = Path(self.settings.data_source_path)
+            # Fallback to source if no working directory - this is expected in dry-run mode
+            # or when no changes were applied
+            logger.warning("packaging_fallback_to_source",
+                          reason="Working directory empty or missing",
+                          working_dir=str(working_dir),
+                          source_dir=str(source_dir))
+            working_dir = source_dir
         
         logger.info("packaging_output", source=str(working_dir), dest=str(output_path))
         
