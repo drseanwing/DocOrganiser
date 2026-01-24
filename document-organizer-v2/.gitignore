@@ -39,7 +39,7 @@ ENV/
 htmlcov/
 .tox/
 
-# Environment variables
+# Environment
 .env
 .env.local
 
