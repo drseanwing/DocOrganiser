@@ -631,8 +631,8 @@ async def test_index_agent_full_workflow(test_db_pool, sample_documents):
 Use pydantic for type-safe configuration:
 
 ```python
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Config(BaseSettings):
@@ -668,9 +668,10 @@ class Config(BaseSettings):
     source_dir: str = Field(default="/data/source", env="SOURCE_DIR")
     working_dir: str = Field(default="/data/working", env="WORKING_DIR")
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False
+    )
 
 # Usage
 config = Config()
