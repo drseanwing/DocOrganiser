@@ -1,0 +1,734 @@
+{
+  "name": "Document Organizer - Upload Results",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "processing-complete",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "u1a2b3c4-d5e6-7890-abcd-ef1234567890",
+      "name": "Webhook - Processing Complete",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "processing-complete-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the incoming webhook payload\nconst payload = $input.first().json;\n\nconst jobId = payload.job_id;\nconst outputPath = payload.output_path;\nconst stats = payload.stats || {};\n\nreturn [{\n  json: {\n    jobId: jobId,\n    outputPath: outputPath,\n    stats: stats,\n    event: payload.event\n  }\n}];"
+      },
+      "id": "u2b3c4d5-e6f7-8901-bcde-f12345678901",
+      "name": "Parse Webhook Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM processing_jobs WHERE id = '{{ $json.jobId }}';",
+        "options": {}
+      },
+      "id": "u3c4d5e6-f7a8-9012-cdef-123456789012",
+      "name": "Get Job Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://login.microsoftonline.com/{{ $env.MS_TENANT_ID }}/oauth2/v2.0/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $env.MS_CLIENT_ID }}"
+            },
+            {
+              "name": "scope",
+              "value": "https://graph.microsoft.com/.default"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.MS_CLIENT_SECRET }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "u4d5e6f7-a8b9-0123-def0-123456789abc",
+      "name": "Get OAuth Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read and extract the output ZIP\nconst fs = require('fs');\nconst path = require('path');\nconst { execSync } = require('child_process');\n\nconst webhookData = $('Parse Webhook Payload').first().json;\nconst jobData = $('Get Job Details').first().json;\nconst accessToken = $('Get OAuth Token').first().json.access_token;\n\nconst outputPath = webhookData.outputPath;\nconst jobId = webhookData.jobId;\n\n// Get upload strategy from environment\nconst uploadStrategy = process.env.UPLOAD_STRATEGY || 'extract'; // 'extract' or 'zip_only'\nconst targetPath = process.env.TARGET_PATH || '/Documents/Organized';\n\ntry {\n  if (!fs.existsSync(outputPath)) {\n    return [{ json: { error: `Output ZIP not found: ${outputPath}`, jobId } }];\n  }\n  \n  const stats = fs.statSync(outputPath);\n  const zipSize = stats.size;\n  \n  if (uploadStrategy === 'zip_only') {\n    // Just upload the ZIP file as-is\n    const zipContent = fs.readFileSync(outputPath);\n    return [{\n      json: {\n        strategy: 'zip_only',\n        jobId: jobId,\n        accessToken: accessToken,\n        targetPath: targetPath,\n        files: [{\n          name: path.basename(outputPath),\n          path: '',\n          content: zipContent.toString('base64'),\n          size: zipSize,\n          isDirectory: false\n        }]\n      }\n    }];\n  }\n  \n  // Extract ZIP and prepare file list\n  const extractDir = `/tmp/upload_${jobId}`;\n  \n  if (fs.existsSync(extractDir)) {\n    execSync(`rm -rf ${extractDir}`);\n  }\n  fs.mkdirSync(extractDir, { recursive: true });\n  \n  // Extract ZIP\n  execSync(`unzip -q \"${outputPath}\" -d \"${extractDir}\"`, { timeout: 300000 });\n  \n  // Build file list recursively\n  function walkDir(dir, basePath = '') {\n    const results = [];\n    const items = fs.readdirSync(dir);\n    \n    for (const item of items) {\n      const fullPath = path.join(dir, item);\n      const relativePath = basePath ? `${basePath}/${item}` : item;\n      const stat = fs.statSync(fullPath);\n      \n      if (stat.isDirectory()) {\n        results.push({\n          name: item,\n          path: basePath,\n          isDirectory: true,\n          size: 0\n        });\n        results.push(...walkDir(fullPath, relativePath));\n      } else {\n        // Read small files into memory, mark large files for chunked upload\n        const isLargeFile = stat.size > 4 * 1024 * 1024; // 4MB threshold\n        results.push({\n          name: item,\n          path: basePath,\n          fullPath: fullPath,\n          isDirectory: false,\n          size: stat.size,\n          isLargeFile: isLargeFile,\n          content: isLargeFile ? null : fs.readFileSync(fullPath).toString('base64')\n        });\n      }\n    }\n    return results;\n  }\n  \n  const files = walkDir(extractDir);\n  \n  // Separate folders and files\n  const folders = files.filter(f => f.isDirectory);\n  const uploadFiles = files.filter(f => !f.isDirectory);\n  \n  return [{\n    json: {\n      strategy: 'extract',\n      jobId: jobId,\n      accessToken: accessToken,\n      targetPath: targetPath,\n      extractDir: extractDir,\n      folders: folders,\n      files: uploadFiles,\n      totalFiles: uploadFiles.length,\n      totalFolders: folders.length\n    }\n  }];\n  \n} catch (e) {\n  return [{ json: { error: e.message, jobId: jobId } }];\n}"
+      },
+      "id": "u5e6f7a8-b9c0-1234-ef01-23456789abcd",
+      "name": "Read Output ZIP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-no-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "u6f7a8b9-c0d1-2345-f012-3456789abcde",
+      "name": "No Errors?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare folder creation requests\nconst data = $input.first().json;\nconst folders = data.folders || [];\n\n// Sort folders by depth to create parents first\nconst sortedFolders = folders.sort((a, b) => {\n  const depthA = (a.path.match(/\\//g) || []).length;\n  const depthB = (b.path.match(/\\//g) || []).length;\n  return depthA - depthB;\n});\n\nreturn sortedFolders.map(folder => ({\n  json: {\n    ...folder,\n    accessToken: data.accessToken,\n    targetPath: data.targetPath,\n    jobId: data.jobId\n  }\n}));"
+      },
+      "id": "u7a8b9c0-d1e2-3456-0123-456789abcdef",
+      "name": "Prepare Folders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "u8b9c0d1-e2f3-4567-1234-56789abcdef0",
+      "name": "Batch Folders",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.microsoft.com/v1.0/me/drive/root:{{ $json.targetPath }}/{{ $json.path }}:/children",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"{{ $json.name }}\",\n  \"folder\": {},\n  \"@microsoft.graph.conflictBehavior\": \"rename\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "u9c0d1e2-f3a4-5678-2345-6789abcdef01",
+      "name": "Create Folder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare file upload requests\nconst data = $('Read Output ZIP').first().json;\nconst files = data.files || [];\n\nreturn files.map(file => ({\n  json: {\n    ...file,\n    accessToken: data.accessToken,\n    targetPath: data.targetPath,\n    jobId: data.jobId,\n    extractDir: data.extractDir\n  }\n}));"
+      },
+      "id": "uad1e2f3-a4b5-6789-3456-789abcdef012",
+      "name": "Prepare Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "ube2f3a4-b5c6-7890-4567-89abcdef0123",
+      "name": "Batch Files",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1780, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-large-file",
+              "leftValue": "={{ $json.isLargeFile }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ucf3a4b5-c6d7-8901-5678-9abcdef01234",
+      "name": "Is Large File?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 400]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://graph.microsoft.com/v1.0/me/drive/root:{{ $json.targetPath }}/{{ $json.path }}/{{ $json.name }}:/content",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/octet-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/octet-stream",
+        "body": "={{ Buffer.from($json.content, 'base64') }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "uda4b5c6-d7e8-9012-6789-abcdef012345",
+      "name": "Upload Small File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 320],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.microsoft.com/v1.0/me/drive/root:{{ $json.targetPath }}/{{ $json.path }}/{{ $json.name }}:/createUploadSession",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"item\": {\n    \"@microsoft.graph.conflictBehavior\": \"rename\"\n  }\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "ueb5c6d7-e8f9-0123-789a-bcdef0123456",
+      "name": "Create Upload Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 520],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Upload large file in chunks\nconst fs = require('fs');\n\nconst uploadSession = $input.first().json;\nconst uploadUrl = uploadSession.uploadUrl;\nconst fileData = $('Is Large File?').first().json;\n\nconst fullPath = fileData.fullPath;\nconst fileSize = fileData.size;\nconst chunkSize = 10 * 1024 * 1024; // 10MB chunks\n\ntry {\n  const fileBuffer = fs.readFileSync(fullPath);\n  let offset = 0;\n  let uploadedRanges = [];\n  \n  while (offset < fileSize) {\n    const end = Math.min(offset + chunkSize, fileSize);\n    const chunk = fileBuffer.slice(offset, end);\n    \n    // Upload chunk using fetch\n    const response = await fetch(uploadUrl, {\n      method: 'PUT',\n      headers: {\n        'Content-Length': chunk.length.toString(),\n        'Content-Range': `bytes ${offset}-${end - 1}/${fileSize}`\n      },\n      body: chunk\n    });\n    \n    if (!response.ok && response.status !== 202) {\n      throw new Error(`Chunk upload failed: ${response.status}`);\n    }\n    \n    uploadedRanges.push({ start: offset, end: end - 1 });\n    offset = end;\n  }\n  \n  return [{\n    json: {\n      success: true,\n      fileName: fileData.name,\n      fileSize: fileSize,\n      chunksUploaded: uploadedRanges.length\n    }\n  }];\n  \n} catch (e) {\n  return [{\n    json: {\n      success: false,\n      error: e.message,\n      fileName: fileData.name\n    }\n  }];\n}"
+      },
+      "id": "ufc6d7e8-f9a0-1234-89ab-cdef01234567",
+      "name": "Upload Large File Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate upload results and continue batch\nconst allUploads = $input.all();\n\nconst successful = allUploads.filter(u => !u.json.error && u.json.success !== false);\nconst failed = allUploads.filter(u => u.json.error || u.json.success === false);\n\nreturn [{\n  json: {\n    batchComplete: true,\n    successCount: successful.length,\n    failedCount: failed.length,\n    failures: failed.map(f => ({ name: f.json.name, error: f.json.error }))\n  }\n}];"
+      },
+      "id": "u0d7e8f9-a0b1-2345-9abc-def012345678",
+      "name": "Aggregate Batch Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE processing_jobs \nSET status = 'completed', \n    completed_at = NOW(),\n    output_uploaded = TRUE,\n    current_phase = 'completed'\nWHERE id = '{{ $('Parse Webhook Payload').first().json.jobId }}'\nRETURNING id, status, completed_at;",
+        "options": {}
+      },
+      "id": "u1e8f9a0-b1c2-3456-abcd-ef0123456789",
+      "name": "Complete Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2880, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cleanup temporary files\nconst fs = require('fs');\nconst { execSync } = require('child_process');\n\nconst extractDir = $('Read Output ZIP').first().json.extractDir;\nconst jobId = $('Parse Webhook Payload').first().json.jobId;\n\ntry {\n  // Remove extraction directory\n  if (extractDir && fs.existsSync(extractDir)) {\n    execSync(`rm -rf ${extractDir}`);\n  }\n  \n  // Mark input zip as processed\n  const inputDir = '/data/input';\n  if (fs.existsSync(inputDir)) {\n    const files = fs.readdirSync(inputDir);\n    for (const file of files) {\n      if (file.includes(jobId) && file.endsWith('.processing')) {\n        const processedPath = file.replace('.processing', '.processed');\n        fs.renameSync(`${inputDir}/${file}`, `${inputDir}/${processedPath}`);\n      }\n    }\n  }\n  \n  return [{ json: { cleanup: 'success', jobId: jobId } }];\n} catch (e) {\n  return [{ json: { cleanup: 'failed', error: e.message, jobId: jobId } }];\n}"
+      },
+      "id": "u2f9a0b1-c2d3-4567-bcde-f01234567890",
+      "name": "Cleanup Temp Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-send-notification",
+              "leftValue": "={{ $env.SEND_NOTIFICATIONS }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "u3a0b1c2-d3e4-5678-cdef-012345678901",
+      "name": "Send Notification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3320, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFICATION_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"event\": \"upload_complete\",\n  \"job_id\": \"{{ $('Parse Webhook Payload').first().json.jobId }}\",\n  \"status\": \"completed\",\n  \"message\": \"Document organization completed and uploaded successfully\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "u4b1c2d3-e4f5-6789-def0-123456789012",
+      "name": "Send Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3540, 220],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"job_id\": \"{{ $('Parse Webhook Payload').first().json.jobId }}\",\n  \"status\": \"completed\",\n  \"message\": \"Upload completed successfully\"\n}",
+        "options": {}
+      },
+      "id": "u5c2d3e4-f5a6-7890-ef01-234567890123",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3760, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE processing_jobs \nSET status = 'failed',\n    error_message = '{{ $json.error }}'\nWHERE id = '{{ $('Parse Webhook Payload').first().json.jobId }}'\nRETURNING id, status;",
+        "options": {}
+      },
+      "id": "u6d3e4f5-a6b7-8901-f012-345678901234",
+      "name": "Update Job Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 520],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"job_id\": \"{{ $('Parse Webhook Payload').first().json.jobId }}\",\n  \"error\": \"{{ $json.error }}\"\n}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "u7e4f5a6-b7c8-9012-0123-456789012345",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1780, 520]
+    }
+  ],
+  "connections": {
+    "Webhook - Processing Complete": {
+      "main": [
+        [
+          {
+            "node": "Parse Webhook Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Webhook Payload": {
+      "main": [
+        [
+          {
+            "node": "Get Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Job Details": {
+      "main": [
+        [
+          {
+            "node": "Get OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get OAuth Token": {
+      "main": [
+        [
+          {
+            "node": "Read Output ZIP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Output ZIP": {
+      "main": [
+        [
+          {
+            "node": "No Errors?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Errors?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Folders",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Files",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Job Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Folders": {
+      "main": [
+        [
+          {
+            "node": "Batch Folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Folders": {
+      "main": [
+        [
+          {
+            "node": "Create Folder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Complete Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Folder": {
+      "main": [
+        [
+          {
+            "node": "Batch Folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Files": {
+      "main": [
+        [
+          {
+            "node": "Batch Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Files": {
+      "main": [
+        [
+          {
+            "node": "Is Large File?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate Batch Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Large File?": {
+      "main": [
+        [
+          {
+            "node": "Create Upload Session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload Small File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Small File": {
+      "main": [
+        [
+          {
+            "node": "Batch Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Upload Session": {
+      "main": [
+        [
+          {
+            "node": "Upload Large File Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Large File Chunks": {
+      "main": [
+        [
+          {
+            "node": "Batch Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Batch Results": {
+      "main": [
+        [
+          {
+            "node": "Complete Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Job": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Temp Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Temp Files": {
+      "main": [
+        [
+          {
+            "node": "Send Notification?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Notification?": {
+      "main": [
+        [
+          {
+            "node": "Send Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Job Failed": {
+      "main": [
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Document Organizer"
+    },
+    {
+      "name": "Cloud Integration"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {},
+  "versionId": "1.0.0"
+}

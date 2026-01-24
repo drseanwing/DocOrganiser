@@ -1,0 +1,498 @@
+{
+  "name": "Document Organizer - Download Folder",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://login.microsoftonline.com/{{ $env.MS_TENANT_ID }}/oauth2/v2.0/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $env.MS_CLIENT_ID }}"
+            },
+            {
+              "name": "scope",
+              "value": "https://graph.microsoft.com/.default"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.MS_CLIENT_SECRET }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "Get OAuth Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_jobs (source_type, source_path, status, current_phase)\nVALUES ('{{ $env.SOURCE_TYPE }}', '{{ $env.SOURCE_PATH }}', 'downloading', 'downloading')\nRETURNING id, source_type, source_path, status, created_at;",
+        "options": {}
+      },
+      "id": "d4e5f6a7-b8c9-0123-def0-123456789abc",
+      "name": "Create Processing Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [720, 400],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Store job info for later use\nconst jobId = $input.first().json.id;\nconst sourceType = $env.SOURCE_TYPE || 'onedrive';\nconst sourcePath = $env.SOURCE_PATH || '/Documents/ToOrganize';\nconst siteId = $env.SOURCE_SITE_ID || '';\n\n// Determine base URL based on source type\nlet baseUrl;\nif (sourceType === 'sharepoint' && siteId) {\n  baseUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:${sourcePath}:/children`;\n} else {\n  baseUrl = `https://graph.microsoft.com/v1.0/me/drive/root:${sourcePath}:/children`;\n}\n\nreturn [\n  {\n    json: {\n      jobId: jobId,\n      sourceType: sourceType,\n      sourcePath: sourcePath,\n      siteId: siteId,\n      baseUrl: baseUrl,\n      accessToken: $('Get OAuth Token').first().json.access_token\n    }\n  }\n];"
+      },
+      "id": "e5f6a7b8-c9d0-1234-ef01-23456789abcd",
+      "name": "Prepare Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.baseUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "f6a7b8c9-d0e1-2345-f012-3456789abcde",
+      "name": "List Folder Contents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build file list from folder contents\n// This recursively lists all files (simplified for n8n)\nconst response = $input.first().json;\nconst items = response.body?.value || [];\nconst jobId = $('Prepare Request').first().json.jobId;\nconst accessToken = $('Prepare Request').first().json.accessToken;\nconst sourceType = $('Prepare Request').first().json.sourceType;\nconst siteId = $('Prepare Request').first().json.siteId;\n\nconst files = [];\nconst folders = [];\n\n// Separate files and folders\nfor (const item of items) {\n  if (item.folder) {\n    folders.push({\n      id: item.id,\n      name: item.name,\n      path: item.parentReference?.path || '',\n      webUrl: item.webUrl\n    });\n  } else if (item.file) {\n    files.push({\n      id: item.id,\n      name: item.name,\n      path: (item.parentReference?.path || '').replace(/^.*root:/, ''),\n      size: item.size,\n      downloadUrl: item['@microsoft.graph.downloadUrl'],\n      mimeType: item.file?.mimeType,\n      createdAt: item.createdDateTime,\n      modifiedAt: item.lastModifiedDateTime\n    });\n  }\n}\n\n// Store file list and job metadata\nreturn [\n  {\n    json: {\n      jobId: jobId,\n      accessToken: accessToken,\n      sourceType: sourceType,\n      siteId: siteId,\n      files: files,\n      folders: folders,\n      totalFiles: files.length,\n      hasMorePages: !!response.body?.['@odata.nextLink'],\n      nextLink: response.body?.['@odata.nextLink']\n    }\n  }\n];"
+      },
+      "id": "a7b8c9d0-e1f2-3456-0123-456789abcdef",
+      "name": "Build File List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1380, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare files for download\nconst data = $input.first().json;\nconst files = data.files || [];\n\n// Return each file as a separate item for the loop\nreturn files.map(file => ({\n  json: {\n    ...file,\n    jobId: data.jobId,\n    accessToken: data.accessToken,\n    totalFiles: data.totalFiles\n  }\n}));"
+      },
+      "id": "b8c9d0e1-f2a3-4567-1234-56789abcdef0",
+      "name": "Split Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "c9d0e1f2-a3b4-5678-2345-6789abcdef01",
+      "name": "Batch Files",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1820, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.downloadUrl }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "d0e1f2a3-b4c5-6789-3456-789abcdef012",
+      "name": "Download File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2040, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect downloaded files and create ZIP\nconst fs = require('fs');\nconst path = require('path');\n\n// Get all items from the current batch\nconst items = $input.all();\nconst jobId = items[0]?.json?.jobId || 'unknown';\n\nconst tempDir = `/tmp/download_${jobId}`;\nconst inputDir = '/data/input';\nconst zipPath = `${inputDir}/source_${jobId}.zip`;\n\n// Ensure directories exist\nif (!fs.existsSync(tempDir)) {\n  fs.mkdirSync(tempDir, { recursive: true });\n}\nif (!fs.existsSync(inputDir)) {\n  fs.mkdirSync(inputDir, { recursive: true });\n}\n\n// Track downloaded files\nconst downloadedFiles = [];\nlet totalSize = 0;\n\nfor (const item of items) {\n  const filePath = item.json.path || '';\n  const fileName = item.json.name;\n  const fileData = item.binary?.data?.data;\n  \n  if (fileData && fileName) {\n    // Create subdirectory structure\n    const targetDir = path.join(tempDir, filePath);\n    if (!fs.existsSync(targetDir)) {\n      fs.mkdirSync(targetDir, { recursive: true });\n    }\n    \n    // Write file\n    const targetPath = path.join(targetDir, fileName);\n    const buffer = Buffer.from(fileData, 'base64');\n    fs.writeFileSync(targetPath, buffer);\n    \n    downloadedFiles.push({\n      name: fileName,\n      path: filePath,\n      size: buffer.length\n    });\n    totalSize += buffer.length;\n  }\n}\n\n// Create ZIP using system command (archiver not available in n8n by default)\n// We'll use a shell command or expect archiver to be installed\ntry {\n  const { execSync } = require('child_process');\n  execSync(`cd ${tempDir} && zip -r ${zipPath} .`, { timeout: 300000 });\n} catch (zipError) {\n  // Fallback: try using tar if zip not available\n  try {\n    const { execSync } = require('child_process');\n    const tarPath = zipPath.replace('.zip', '.tar.gz');\n    execSync(`cd ${tempDir} && tar -czf ${tarPath} .`, { timeout: 300000 });\n  } catch (e) {\n    return [{ json: { error: 'Failed to create archive: ' + e.message } }];\n  }\n}\n\n// Cleanup temp directory\ntry {\n  const { execSync } = require('child_process');\n  execSync(`rm -rf ${tempDir}`);\n} catch (e) {\n  // Ignore cleanup errors\n}\n\nreturn [\n  {\n    json: {\n      jobId: jobId,\n      zipPath: zipPath,\n      fileCount: downloadedFiles.length,\n      totalSize: totalSize,\n      files: downloadedFiles\n    }\n  }\n];"
+      },
+      "id": "e1f2a3b4-c5d6-7890-4567-89abcdef0123",
+      "name": "Create ZIP Archive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2260, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE processing_jobs \nSET source_zip_path = '{{ $json.zipPath }}', \n    source_file_count = {{ $json.fileCount }},\n    source_total_size = {{ $json.totalSize }},\n    status = 'downloaded',\n    current_phase = 'downloaded'\nWHERE id = '{{ $json.jobId }}'\nRETURNING id, source_zip_path, source_file_count, status;",
+        "options": {}
+      },
+      "id": "f2a3b4c5-d6e7-8901-5678-9abcdef01234",
+      "name": "Update Job Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2480, 400],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/download-complete",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "event",
+              "value": "download_complete"
+            },
+            {
+              "name": "job_id",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "name": "zip_path",
+              "value": "={{ $('Create ZIP Archive').first().json.zipPath }}"
+            },
+            {
+              "name": "file_count",
+              "value": "={{ $('Create ZIP Archive').first().json.fileCount }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "a3b4c5d6-e7f8-9012-6789-abcdef012345",
+      "name": "Trigger Processing Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2700, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return final result\nconst zipInfo = $('Create ZIP Archive').first().json;\nconst jobInfo = $('Update Job Status').first().json;\n\nreturn [\n  {\n    json: {\n      success: true,\n      jobId: jobInfo.id,\n      zipPath: zipInfo.zipPath,\n      fileCount: zipInfo.fileCount,\n      totalSize: zipInfo.totalSize,\n      message: `Successfully downloaded ${zipInfo.fileCount} files to ${zipInfo.zipPath}`\n    }\n  }\n];"
+      },
+      "id": "b4c5d6e7-f8a9-0123-789a-bcdef0123456",
+      "name": "Return Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2920, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE processing_jobs \nSET status = 'failed',\n    error_message = '{{ $json.error || \"Unknown error during download\" }}'\nWHERE id = '{{ $('Create Processing Job').first().json.id }}';",
+        "options": {}
+      },
+      "id": "c5d6e7f8-a9b0-1234-89ab-cdef01234567",
+      "name": "Update Job Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2040, 600],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-error-check",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d6e7f8a9-b0c1-2345-9abc-def012345678",
+      "name": "Check For Errors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1820, 600]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get OAuth Token": {
+      "main": [
+        [
+          {
+            "node": "Create Processing Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Processing Job": {
+      "main": [
+        [
+          {
+            "node": "Prepare Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Request": {
+      "main": [
+        [
+          {
+            "node": "List Folder Contents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Folder Contents": {
+      "main": [
+        [
+          {
+            "node": "Build File List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build File List": {
+      "main": [
+        [
+          {
+            "node": "Split Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Files": {
+      "main": [
+        [
+          {
+            "node": "Batch Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Files": {
+      "main": [
+        [
+          {
+            "node": "Download File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create ZIP Archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download File": {
+      "main": [
+        [
+          {
+            "node": "Batch Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create ZIP Archive": {
+      "main": [
+        [
+          {
+            "node": "Check For Errors",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check For Errors": {
+      "main": [
+        [
+          {
+            "node": "Update Job Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Job Status": {
+      "main": [
+        [
+          {
+            "node": "Trigger Processing Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Processing Workflow": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Document Organizer"
+    },
+    {
+      "name": "Cloud Integration"
+    }
+  ],
+  "triggerCount": 2,
+  "pinData": {},
+  "versionId": "1.0.0"
+}
