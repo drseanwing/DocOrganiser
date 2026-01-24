@@ -9,7 +9,6 @@ Phase 4 of the processing pipeline:
 5. Store naming schemas, tag taxonomy, directory structure, and file assignments
 """
 
-import asyncio
 import json
 import uuid
 from datetime import datetime
@@ -18,7 +17,7 @@ from collections import Counter
 
 from sqlalchemy import text
 
-from src.config import ProcessingPhase, get_settings
+from src.config import ProcessingPhase
 from src.agents.base_agent import BaseAgent, AgentResult
 from src.services.claude_service import ClaudeService
 
@@ -80,7 +79,6 @@ class OrganizeAgent(BaseAgent):
         Returns:
             AgentResult with organization statistics
         """
-        start_time = datetime.utcnow()
         self.logger.info("organize_agent_starting", force=force)
         
         # Validate prerequisites

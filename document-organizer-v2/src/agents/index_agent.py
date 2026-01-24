@@ -10,17 +10,16 @@ Phase 1 of the processing pipeline:
 6. Store everything in document_items table
 """
 
-import os
 import hashlib
 import asyncio
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, AsyncIterator
+from typing import Optional
 import mimetypes
 
 from sqlalchemy import text
 
-from src.config import ProcessingPhase, get_settings
+from src.config import ProcessingPhase
 from src.agents.base_agent import BaseAgent, AgentResult
 from src.services.ollama_service import OllamaService
 from src.extractors import get_extractor

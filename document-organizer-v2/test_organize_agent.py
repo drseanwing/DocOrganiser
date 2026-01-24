@@ -4,9 +4,7 @@ Basic tests for OrganizeAgent and ClaudeService.
 These tests validate the core functionality without requiring actual API calls or database.
 """
 
-import pytest
-import json
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import patch
 from src.agents.organize_agent import OrganizeAgent
 from src.services.claude_service import ClaudeService
 from src.config import Settings

@@ -4,7 +4,6 @@ Configuration management for Document Organizer v2.
 Uses pydantic-settings for type-safe configuration with environment variable support.
 """
 
-import os
 from enum import Enum
 from typing import Optional
 from pydantic import Field
