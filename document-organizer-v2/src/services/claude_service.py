@@ -249,15 +249,15 @@ class ClaudeService:
         # Try to extract from markdown code block
         json_patterns = [
             # ```json ... ```
-            (r'```json\s*\n?(.*?)```', 1),
+            r'```json\s*\n?(.*?)```',
             # ``` ... ```
-            (r'```\s*\n?(.*?)```', 1),
+            r'```\s*\n?(.*?)```',
             # Look for JSON object pattern
-            (r'(\{[\s\S]*\})', 0),
+            r'(\{[\s\S]*\})',
         ]
         
         import re
-        for pattern, flags in json_patterns:
+        for pattern in json_patterns:
             match = re.search(pattern, text, re.DOTALL)
             if match:
                 try:
