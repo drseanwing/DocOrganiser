@@ -57,3 +57,6 @@ data/
 *.db
 *.sqlite
 *.sqlite3
+
+# Artifacts
+*.zip

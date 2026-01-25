@@ -1,25 +1,25 @@
 {
-  "name": "DocOrg - Webhook Receiver",
+  "name": "Document Organizer - Webhook Receiver",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "processing-callback",
+        "path": "processing-status",
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "webhook-callback",
-      "name": "Webhook - All Callbacks",
+      "id": "w1a2b3c4-d5e6-7890-abcd-ef1234567890",
+      "name": "Webhook - Processing Status",
       "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1.1,
+      "typeVersion": 2,
       "position": [240, 400],
-      "webhookId": "processing-callback"
+      "webhookId": "processing-status-webhook"
     },
     {
       "parameters": {
-        "jsCode": "// Parse webhook payload\nconst item = $input.first();\nconst body = item.json.body || item.json;\n\nif (!body.event) {\n  throw new Error('Missing event type in payload');\n}\n\nreturn [{\n  json: {\n    event: body.event,\n    jobId: body.job_id || body.jobId,\n    timestamp: body.timestamp || new Date().toISOString(),\n    payload: body\n  }\n}];"
+        "jsCode": "// Parse and validate the incoming webhook payload\nconst payload = $input.first().json;\n\n// Validate required fields\nif (!payload.event) {\n  return [{ json: { error: 'Missing required field: event', valid: false } }];\n}\n\nif (!payload.job_id) {\n  return [{ json: { error: 'Missing required field: job_id', valid: false } }];\n}\n\n// Normalize event names\nconst validEvents = [\n  'processing_started',\n  'phase_complete', \n  'review_required',\n  'processing_complete',\n  'processing_failed'\n];\n\nconst event = payload.event.toLowerCase().replace(/-/g, '_');\n\nif (!validEvents.includes(event)) {\n  return [{ json: { error: `Unknown event type: ${event}`, valid: false } }];\n}\n\nreturn [{\n  json: {\n    valid: true,\n    event: event,\n    jobId: payload.job_id,\n    phase: payload.phase || null,\n    stats: payload.stats || {},\n    outputPath: payload.output_path || null,\n    reportPath: payload.report_path || null,\n    summary: payload.summary || {},\n    error: payload.error || null,\n    partialOutput: payload.partial_output || null,\n    timestamp: payload.timestamp || new Date().toISOString(),\n    rawPayload: payload\n  }\n}];"
       },
-      "id": "parse-payload",
+      "id": "w2b3c4d5-e6f7-8901-bcde-f12345678901",
       "name": "Parse Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -28,290 +28,394 @@
     {
       "parameters": {
         "conditions": {
-          "string": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{ $json.event }}",
-              "operation": "equals"
+              "id": "condition-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "w3c4d5e6-f7a8-9012-cdef-123456789012",
+      "name": "Payload Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "processing_started",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Started"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "phase_complete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Phase Complete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "review_required",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Review Required"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "processing_complete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Complete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "processing_failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Failed"
             }
           ]
         },
         "options": {}
       },
-      "id": "route-by-event",
-      "name": "Route By Event Type",
+      "id": "w4d5e6f7-a8b9-0123-def0-123456789abc",
+      "name": "Route By Event",
       "type": "n8n-nodes-base.switch",
-      "typeVersion": 1,
-      "position": [680, 400]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=UPDATE processing_jobs SET status = 'processing', current_phase = 'processing', started_at = NOW() WHERE id = '{{ $json.jobId }}' RETURNING *;",
-        "options": {}
-      },
-      "id": "handle-started",
-      "name": "Processing Started",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [900, 240],
-      "credentials": {
-        "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// Handle phase complete event\nconst item = $input.first();\nconst payload = item.json.payload;\nconst phase = payload.phase;\nconst stats = payload.stats || {};\n\nconsole.log(`Phase completed: ${phase}`);\nconsole.log(`Stats:`, stats);\n\nreturn [{\n  json: {\n    jobId: item.json.jobId,\n    phase: phase,\n    filesProcessed: stats.files_processed || 0,\n    duration: stats.duration_seconds || 0,\n    timestamp: item.json.timestamp\n  }\n}];"
-      },
-      "id": "parse-phase-stats",
-      "name": "Parse Phase Stats",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [900, 320]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=UPDATE processing_jobs SET current_phase = '{{ $json.phase }}', files_processed = {{ $json.filesProcessed }}, progress_percent = CASE WHEN '{{ $json.phase }}' = 'indexing' THEN 25 WHEN '{{ $json.phase }}' = 'deduplicating' THEN 50 WHEN '{{ $json.phase }}' = 'versioning' THEN 75 WHEN '{{ $json.phase }}' = 'organizing' THEN 90 ELSE progress_percent END WHERE id = '{{ $json.jobId }}' RETURNING *;",
-        "options": {}
-      },
-      "id": "update-phase-progress",
-      "name": "Update Phase Progress",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [1120, 320],
-      "credentials": {
-        "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// Handle review required event\nconst item = $input.first();\nconst payload = item.json.payload;\nconst summary = payload.summary || {};\nconst reportPath = payload.report_path;\n\nconsole.log('Review required');\nconsole.log('Summary:', summary);\nconsole.log('Report:', reportPath);\n\nreturn [{\n  json: {\n    jobId: item.json.jobId,\n    reportPath: reportPath,\n    totalFiles: summary.total_files || 0,\n    duplicates: summary.duplicates || 0,\n    versions: summary.versions || 0,\n    changesPlanned: summary.changes_planned || 0,\n    reviewUrl: `${$env.N8N_WEBHOOK_URL}/review/${item.json.jobId}`\n  }\n}];"
-      },
-      "id": "parse-review-data",
-      "name": "Parse Review Data",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "typeVersion": 3.2,
       "position": [900, 400]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=UPDATE processing_jobs SET status = 'review_required', current_phase = 'review', progress_percent = 95 WHERE id = '{{ $json.jobId }}' RETURNING *;",
+        "query": "UPDATE processing_jobs \nSET status = 'processing', \n    started_at = NOW(),\n    current_phase = 'started'\nWHERE id = '{{ $json.jobId }}'\nRETURNING id, status, started_at;",
         "options": {}
       },
-      "id": "update-review-status",
-      "name": "Update Review Status",
+      "id": "w5e6f7a8-b9c0-1234-ef01-23456789abcd",
+      "name": "DB - Processing Started",
       "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [1120, 400],
+      "typeVersion": 2.5,
+      "position": [1140, 120],
       "credentials": {
         "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
         }
       }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE processing_jobs \nSET current_phase = '{{ $json.phase }}',\n    progress_percent = CASE \n      WHEN '{{ $json.phase }}' = 'indexing' THEN 25\n      WHEN '{{ $json.phase }}' = 'deduplicating' THEN 50\n      WHEN '{{ $json.phase }}' = 'versioning' THEN 75\n      WHEN '{{ $json.phase }}' = 'organizing' THEN 90\n      ELSE progress_percent\n    END,\n    files_processed = COALESCE({{ $json.stats.files_processed }}, files_processed)\nWHERE id = '{{ $json.jobId }}'\nRETURNING id, status, current_phase, progress_percent;",
+        "options": {}
+      },
+      "id": "w6f7a8b9-c0d1-2345-f012-3456789abcde",
+      "name": "DB - Phase Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1140, 280],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE processing_jobs \nSET status = 'review_required',\n    current_phase = 'review',\n    duplicates_found = COALESCE({{ $json.summary.duplicates }}, 0),\n    version_chains_found = COALESCE({{ $json.summary.versions }}, 0)\nWHERE id = '{{ $json.jobId }}'\nRETURNING id, status;",
+        "options": {}
+      },
+      "id": "w7a8b9c0-d1e2-3456-0123-456789abcdef",
+      "name": "DB - Review Required",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1140, 440],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE processing_jobs \nSET status = 'packaging',\n    current_phase = 'packaging',\n    output_zip_path = '{{ $json.outputPath }}',\n    progress_percent = 95\nWHERE id = '{{ $json.jobId }}'\nRETURNING id, status, output_zip_path;",
+        "options": {}
+      },
+      "id": "w8b9c0d1-e2f3-4567-1234-56789abcdef0",
+      "name": "DB - Processing Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1140, 600],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE processing_jobs \nSET status = 'failed',\n    current_phase = '{{ $json.phase }}',\n    error_message = '{{ $json.error }}'\nWHERE id = '{{ $json.jobId }}'\nRETURNING id, status, error_message;",
+        "options": {}
+      },
+      "id": "w9c0d1e2-f3a4-5678-2345-6789abcdef01",
+      "name": "DB - Processing Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1140, 760],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_log (document_id, batch_id, action, phase, details, success, created_at)\nVALUES (\n  NULL,\n  '{{ $('Parse Payload').first().json.jobId }}'::uuid,\n  '{{ $('Parse Payload').first().json.event }}',\n  '{{ $('Parse Payload').first().json.phase || \"n/a\" }}',\n  '{{ JSON.stringify($('Parse Payload').first().json.stats || {}) }}',\n  TRUE,\n  NOW()\n)\nRETURNING id;",
+        "options": {}
+      },
+      "id": "wad1e2f3-a4b5-6789-3456-789abcdef012",
+      "name": "Log Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1380, 400],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      },
+      "continueOnFail": true
     },
     {
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{ $env.AUTO_APPROVE === 'true' }}",
-              "value2": true
+              "id": "condition-auto-approve",
+              "leftValue": "={{ $env.AUTO_APPROVE_REVIEW }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
-          ]
-        }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "check-auto-approve",
-      "name": "Check Auto-Approve",
+      "id": "wbe2f3a4-b5c6-7890-4567-89abcdef0123",
+      "name": "Auto Approve?",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [1340, 400]
+      "typeVersion": 2,
+      "position": [1380, 540]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://{{ $env.PROCESSOR_HOST || 'processor' }}:{{ $env.PROCESSOR_PORT || '8000' }}/approve",
+        "url": "http://processor:8000/approve",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "job_id",
-              "value": "={{ $json.id }}"
-            }
-          ]
-        },
-        "options": {}
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": \"{{ $('Parse Payload').first().json.jobId }}\",\n  \"approved\": true,\n  \"auto_approved\": true\n}",
+        "options": {
+          "timeout": 30000
+        }
       },
-      "id": "auto-approve",
-      "name": "Auto-Approve Processing",
+      "id": "wcf3a4b5-c6d7-8901-5678-9abcdef01234",
+      "name": "Auto Approve Job",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1560, 320]
-    },
-    {
-      "parameters": {
-        "fromEmail": "={{ $env.SMTP_FROM }}",
-        "toEmail": "={{ $env.NOTIFICATION_EMAIL }}",
-        "subject": "=Review Required - Document Organization Job {{ $json.id }}",
-        "text": "=Job ID: {{ $json.id }}\\n\\nA document organization job requires your review.\\n\\nSummary:\\n- Total Files: {{ $json.totalFiles }}\\n- Duplicates Found: {{ $json.duplicates }}\\n- Version Chains: {{ $json.versions }}\\n- Changes Planned: {{ $json.changesPlanned }}\\n\\nReview Report: {{ $json.reportPath }}\\n\\nReview URL: {{ $json.reviewUrl }}\\n\\nPlease review and approve or reject the changes.",
-        "options": {}
-      },
-      "id": "send-review-email",
-      "name": "Send Review Notification",
-      "type": "n8n-nodes-base.emailSend",
-      "typeVersion": 2,
-      "position": [1560, 480],
-      "credentials": {
-        "smtp": {
-          "id": "smtp-credential",
-          "name": "SMTP"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// Handle processing complete event\nconst item = $input.first();\nconst payload = item.json.payload;\nconst outputPath = payload.output_path;\nconst stats = payload.stats || {};\n\nconsole.log('Processing completed successfully');\nconsole.log('Output:', outputPath);\nconsole.log('Stats:', stats);\n\nreturn [{\n  json: {\n    jobId: item.json.jobId,\n    outputPath: outputPath,\n    stats: stats\n  }\n}];"
-      },
-      "id": "parse-complete-data",
-      "name": "Parse Complete Data",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [900, 480]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=UPDATE processing_jobs SET status = 'packaging', current_phase = 'packaging', progress_percent = 100, output_zip_path = '{{ $json.outputPath }}' WHERE id = '{{ $json.jobId }}' RETURNING *;",
-        "options": {}
-      },
-      "id": "update-complete-status",
-      "name": "Update Complete Status",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [1120, 480],
-      "credentials": {
-        "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
-        }
-      }
+      "position": [1600, 440],
+      "continueOnFail": true
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.N8N_WEBHOOK_URL }}/webhook/processing-complete",
+        "url": "={{ $env.NOTIFICATION_WEBHOOK_URL }}",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "job_id",
-              "value": "={{ $json.id }}"
-            },
-            {
-              "name": "output_path",
-              "value": "={{ $json.output_zip_path }}"
-            },
-            {
-              "name": "stats",
-              "value": "={{ JSON.stringify($json.stats || {}) }}"
-            }
-          ]
-        },
-        "options": {}
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"event\": \"review_required\",\n  \"job_id\": \"{{ $('Parse Payload').first().json.jobId }}\",\n  \"report_path\": \"{{ $('Parse Payload').first().json.reportPath }}\",\n  \"summary\": {{ JSON.stringify($('Parse Payload').first().json.summary) }},\n  \"message\": \"Document organization requires review before execution\",\n  \"review_url\": \"{{ $env.REVIEW_UI_URL }}/jobs/{{ $('Parse Payload').first().json.jobId }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
       },
-      "id": "trigger-upload",
+      "id": "wda4b5c6-d7e8-9012-6789-abcdef012345",
+      "name": "Notify Review Required",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1600, 640],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://{{ $env.N8N_HOST || 'localhost' }}:{{ $env.N8N_PORT || '5678' }}/webhook/processing-complete",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"event\": \"processing_complete\",\n  \"job_id\": \"{{ $('Parse Payload').first().json.jobId }}\",\n  \"output_path\": \"{{ $('Parse Payload').first().json.outputPath }}\",\n  \"stats\": {{ JSON.stringify($('Parse Payload').first().json.stats) }}\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "web5c6d7-e8f9-0123-789a-bcdef0123456",
       "name": "Trigger Upload Workflow",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1340, 480]
+      "position": [1380, 720]
     },
     {
       "parameters": {
-        "jsCode": "// Handle processing failed event\nconst item = $input.first();\nconst payload = item.json.payload;\nconst error = payload.error;\nconst phase = payload.phase;\nconst partialOutput = payload.partial_output;\n\nconsole.error('Processing failed');\nconsole.error('Error:', error);\nconsole.error('Failed at phase:', phase);\n\nreturn [{\n  json: {\n    jobId: item.json.jobId,\n    error: error,\n    phase: phase,\n    partialOutput: partialOutput\n  }\n}];"
-      },
-      "id": "parse-error-data",
-      "name": "Parse Error Data",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [900, 560]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=UPDATE processing_jobs SET status = 'failed', current_phase = '{{ $json.phase }}', error_message = '{{ $json.error }}' WHERE id = '{{ $json.jobId }}' RETURNING *;",
-        "options": {}
-      },
-      "id": "update-failed-status",
-      "name": "Update Failed Status",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [1120, 560],
-      "credentials": {
-        "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
+        "method": "POST",
+        "url": "={{ $env.NOTIFICATION_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"event\": \"processing_failed\",\n  \"job_id\": \"{{ $('Parse Payload').first().json.jobId }}\",\n  \"error\": \"{{ $('Parse Payload').first().json.error }}\",\n  \"phase\": \"{{ $('Parse Payload').first().json.phase }}\",\n  \"message\": \"Document processing failed\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 10000
         }
-      }
+      },
+      "id": "wfc6d7e8-f9a0-1234-89ab-cdef01234567",
+      "name": "Notify Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 880],
+      "continueOnFail": true
     },
     {
       "parameters": {
-        "fromEmail": "={{ $env.SMTP_FROM }}",
-        "toEmail": "={{ $env.NOTIFICATION_EMAIL }}",
-        "subject": "=Processing Failed - Document Organization Job {{ $json.id }}",
-        "text": "=Job ID: {{ $json.id }}\\n\\nProcessing has failed.\\n\\nError: {{ $json.error_message }}\\nFailed at phase: {{ $json.current_phase }}\\n\\nPlease check the logs for more details.",
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"event\": \"{{ $('Parse Payload').first().json.event }}\",\n  \"job_id\": \"{{ $('Parse Payload').first().json.jobId }}\",\n  \"message\": \"Event processed successfully\"\n}",
         "options": {}
       },
-      "id": "send-failure-email",
-      "name": "Send Failure Notification",
-      "type": "n8n-nodes-base.emailSend",
-      "typeVersion": 2,
-      "position": [1340, 560],
-      "credentials": {
-        "smtp": {
-          "id": "smtp-credential",
-          "name": "SMTP"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "respondWith": "allIncomingItems",
-        "options": {}
-      },
-      "id": "respond-webhook",
-      "name": "Respond to Webhook",
+      "id": "w0d7e8f9-a0b1-2345-9abc-def012345678",
+      "name": "Respond Success",
       "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [1780, 400]
+      "typeVersion": 1.1,
+      "position": [1820, 400]
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "=INSERT INTO processing_events (job_id, event_type, event_data, created_at) VALUES ('{{ $json.jobId }}', '{{ $json.event }}', '{{ JSON.stringify($json.payload) }}', NOW());",
-        "options": {}
-      },
-      "id": "log-event",
-      "name": "Log Event",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [900, 640],
-      "credentials": {
-        "postgres": {
-          "id": "postgres-credential",
-          "name": "Document Organizer DB"
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"error\": \"{{ $json.error }}\"\n}",
+        "options": {
+          "responseCode": 400
         }
-      }
+      },
+      "id": "w1e8f9a0-b1c2-3456-abcd-ef0123456789",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [900, 600]
     }
   ],
   "connections": {
-    "Webhook - All Callbacks": {
+    "Webhook - Processing Status": {
       "main": [
         [
           {
@@ -326,10 +430,73 @@
       "main": [
         [
           {
-            "node": "Route By Event Type",
+            "node": "Payload Valid?",
             "type": "main",
             "index": 0
-          },
+          }
+        ]
+      ]
+    },
+    "Payload Valid?": {
+      "main": [
+        [
+          {
+            "node": "Route By Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route By Event": {
+      "main": [
+        [
+          {
+            "node": "DB - Processing Started",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB - Phase Complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB - Review Required",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB - Processing Complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB - Processing Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB - Processing Started": {
+      "main": [
+        [
           {
             "node": "Log Event",
             "type": "main",
@@ -338,152 +505,69 @@
         ]
       ]
     },
-    "Route By Event Type": {
+    "DB - Phase Complete": {
       "main": [
         [
           {
-            "node": "Processing Started",
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB - Review Required": {
+      "main": [
+        [
+          {
+            "node": "Auto Approve?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Approve?": {
+      "main": [
+        [
+          {
+            "node": "Auto Approve Job",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Parse Phase Stats",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Parse Review Data",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Parse Complete Data",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Parse Error Data",
+            "node": "Notify Review Required",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Processing Started": {
+    "Auto Approve Job": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Log Event",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Parse Phase Stats": {
+    "Notify Review Required": {
       "main": [
         [
           {
-            "node": "Update Phase Progress",
+            "node": "Log Event",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Update Phase Progress": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Review Data": {
-      "main": [
-        [
-          {
-            "node": "Update Review Status",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Update Review Status": {
-      "main": [
-        [
-          {
-            "node": "Check Auto-Approve",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check Auto-Approve": {
-      "main": [
-        [
-          {
-            "node": "Auto-Approve Processing",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Send Review Notification",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Auto-Approve Processing": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Send Review Notification": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Complete Data": {
-      "main": [
-        [
-          {
-            "node": "Update Complete Status",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Update Complete Status": {
+    "DB - Processing Complete": {
       "main": [
         [
           {
@@ -498,40 +582,29 @@
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Log Event",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Parse Error Data": {
+    "DB - Processing Failed": {
       "main": [
         [
           {
-            "node": "Update Failed Status",
+            "node": "Notify Failure",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Update Failed Status": {
+    "Notify Failure": {
       "main": [
         [
           {
-            "node": "Send Failure Notification",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Send Failure Notification": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
+            "node": "Log Event",
             "type": "main",
             "index": 0
           }
@@ -542,7 +615,7 @@
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Respond Success",
             "type": "main",
             "index": 0
           }
@@ -551,19 +624,21 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
   },
   "staticData": null,
   "tags": [
     {
-      "createdAt": "2024-01-01T00:00:00.000Z",
-      "updatedAt": "2024-01-01T00:00:00.000Z",
-      "id": "1",
       "name": "Document Organizer"
+    },
+    {
+      "name": "Cloud Integration"
     }
   ],
+  "triggerCount": 1,
   "pinData": {},
-  "meta": {
-    "instanceId": "doc-organizer-n8n"
-  }
+  "versionId": "1.0.0"
 }
