@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
     claude_model: str = Field(default="claude-sonnet-4-20250514", description="Claude model for organization")
     claude_max_tokens: int = Field(default=16000, description="Max tokens for Claude response")
+
+    # -------------------------------------------------------------------------
+    # Microsoft Graph Configuration
+    # -------------------------------------------------------------------------
+    ms_tenant_id: Optional[str] = Field(default=None, description="Microsoft tenant ID")
+    ms_client_id: Optional[str] = Field(default=None, description="Microsoft application (client) ID")
+    ms_client_secret: Optional[str] = Field(default=None, description="Microsoft client secret")
     
     # -------------------------------------------------------------------------
     # Processing Configuration
