@@ -4,12 +4,16 @@ A Docker-based document organization system that uses AI to detect duplicates, m
 
 ## Features
 
-- Download folders from OneDrive/SharePoint as ZIP
-- Analyze content with local LLM (Ollama) and Claude API
-- Detect duplicates via content hashing + LLM decision-making
-- Identify document versions and apply version control
-- Reorganize files with full rollback capability
-- Re-zip and upload when approved
+- **Admin Configuration Panel**: Web-based UI for managing API credentials and settings
+- **PowerAutomate Integration**: Flows for SharePoint configuration and authentication
+- **Cloud Integration**: Download folders from OneDrive/SharePoint as ZIP
+- **AI-Powered Analysis**: Uses local LLM (Ollama) and Claude API for content understanding
+- **Duplicate Detection**: Content hashing + LLM decision-making for intelligent deduplication
+- **Version Management**: Identifies document versions and applies version control
+- **Smart Organization**: AI-driven file naming and categorization
+- **Full Rollback**: All changes tracked with complete rollback capability
+- **Large File Support**: Handles files >4MB with chunked upload sessions
+- **Secure Configuration**: Encrypted credential storage with masked display
 
 ## Quick Start
 
@@ -42,7 +46,20 @@ docker-compose up -d
 docker exec -it doc_organizer_ollama ollama pull llama3.2
 ```
 
-### 4. Process Documents
+### 4. Configure via Admin Interface
+
+Open your browser to `http://localhost:8000/admin` and:
+
+1. **Configure Microsoft Graph API** (for SharePoint access)
+   - Enter Tenant ID, Client ID, Client Secret
+2. **Configure Ollama** (local LLM)
+   - Verify URL: `http://ollama:11434`
+3. **Configure Claude API** (optional but recommended)
+   - Enter your Anthropic API key
+4. **Test Connections**
+   - Click "Test Connections" to verify all services
+
+### 5. Process Documents
 
 ```bash
 # Wait mode (watches for new ZIPs)
@@ -50,6 +67,11 @@ docker-compose exec processor python -m src.main --wait
 
 # Or process a specific ZIP
 docker-compose exec processor python -m src.main --zip /data/input/documents.zip
+
+# Or trigger via API
+curl -X POST http://localhost:8000/webhook/job \
+  -H "Content-Type: application/json" \
+  -d '{"source_path": "/data/input/documents.zip"}'
 ```
 
 ## Development Setup
