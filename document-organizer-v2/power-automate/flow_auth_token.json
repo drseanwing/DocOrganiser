@@ -1,0 +1,119 @@
+{
+  "name": "DocOrganiser - Get Auth Token",
+  "description": "Retrieves OAuth2 bearer token from Azure AD for Microsoft Graph API access. This flow uses client credentials flow as true OAuth is not available on the tenant.",
+  "version": "1.0.0",
+  "trigger": {
+    "type": "manual",
+    "displayName": "Manually trigger a flow"
+  },
+  "actions": [
+    {
+      "id": "get_tenant_config",
+      "type": "SharePoint.GetItem",
+      "displayName": "Get Tenant Configuration",
+      "description": "Retrieve API credentials from SharePoint configuration list",
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "list": "DocOrganiser_Configuration",
+        "id": 1
+      },
+      "outputs": {
+        "tenant_id": "@{body('get_tenant_config')?['TenantID']}",
+        "client_id": "@{body('get_tenant_config')?['ClientID']}",
+        "client_secret": "@{body('get_tenant_config')?['ClientSecret']}"
+      }
+    },
+    {
+      "id": "request_token",
+      "type": "Http",
+      "displayName": "Request OAuth2 Token",
+      "description": "Call Azure AD token endpoint using client credentials",
+      "inputs": {
+        "method": "POST",
+        "uri": "https://login.microsoftonline.com/@{outputs('get_tenant_config')?['tenant_id']}/oauth2/v2.0/token",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "body": "client_id=@{outputs('get_tenant_config')?['client_id']}&client_secret=@{outputs('get_tenant_config')?['client_secret']}&scope=https://graph.microsoft.com/.default&grant_type=client_credentials"
+      }
+    },
+    {
+      "id": "parse_token_response",
+      "type": "ParseJson",
+      "displayName": "Parse Token Response",
+      "inputs": {
+        "content": "@body('request_token')",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "token_type": {"type": "string"},
+            "expires_in": {"type": "integer"},
+            "access_token": {"type": "string"}
+          }
+        }
+      }
+    },
+    {
+      "id": "store_token",
+      "type": "SharePoint.UpdateItem",
+      "displayName": "Store Token in SharePoint",
+      "description": "Cache token for reuse until expiration",
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "list": "DocOrganiser_TokenCache",
+        "id": 1,
+        "item": {
+          "AccessToken": "@{body('parse_token_response')?['access_token']}",
+          "TokenType": "@{body('parse_token_response')?['token_type']}",
+          "ExpiresAt": "@{addSeconds(utcNow(), body('parse_token_response')?['expires_in'])}"
+        }
+      }
+    },
+    {
+      "id": "return_response",
+      "type": "Response",
+      "displayName": "Return Token Response",
+      "inputs": {
+        "statusCode": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "success": true,
+          "token": "@{body('parse_token_response')?['access_token']}",
+          "token_type": "@{body('parse_token_response')?['token_type']}",
+          "expires_in": "@{body('parse_token_response')?['expires_in']}",
+          "expires_at": "@{addSeconds(utcNow(), body('parse_token_response')?['expires_in'])}"
+        }
+      }
+    }
+  ],
+  "errorHandling": {
+    "scope": "flow",
+    "runAfterFailure": {
+      "actions": [
+        {
+          "id": "send_error_notification",
+          "type": "Office365.SendEmail",
+          "inputs": {
+            "to": "@{triggerBody()?['adminEmail']}",
+            "subject": "DocOrganiser - Token Retrieval Failed",
+            "body": "Failed to retrieve OAuth token. Error: @{body('request_token')?['error']}<br/>Description: @{body('request_token')?['error_description']}"
+          }
+        },
+        {
+          "id": "return_error",
+          "type": "Response",
+          "inputs": {
+            "statusCode": 500,
+            "body": {
+              "success": false,
+              "error": "@{body('request_token')?['error']}",
+              "error_description": "@{body('request_token')?['error_description']}"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

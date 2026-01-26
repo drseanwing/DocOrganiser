@@ -1,0 +1,343 @@
+{
+  "name": "DocOrganiser - Initialize SharePoint Schema",
+  "description": "Creates SharePoint lists and libraries required for DocOrganiser configuration and token caching. Run once during initial setup.",
+  "version": "1.0.0",
+  "trigger": {
+    "type": "manual",
+    "displayName": "Manually trigger a flow"
+  },
+  "actions": [
+    {
+      "id": "create_config_list",
+      "type": "SharePoint.CreateList",
+      "displayName": "Create Configuration List",
+      "description": "Stores API credentials and system settings",
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "listName": "DocOrganiser_Configuration",
+        "listTemplate": "GenericList",
+        "columns": [
+          {
+            "name": "Title",
+            "type": "Text",
+            "required": true,
+            "description": "Configuration name"
+          },
+          {
+            "name": "TenantID",
+            "type": "Text",
+            "required": true,
+            "description": "Azure AD Tenant ID"
+          },
+          {
+            "name": "ClientID",
+            "type": "Text",
+            "required": true,
+            "description": "Azure AD Application (Client) ID"
+          },
+          {
+            "name": "ClientSecret",
+            "type": "Text",
+            "required": true,
+            "encrypted": true,
+            "description": "Azure AD Client Secret (encrypted)"
+          },
+          {
+            "name": "OllamaBaseURL",
+            "type": "Text",
+            "required": false,
+            "defaultValue": "http://localhost:11434",
+            "description": "Ollama service endpoint"
+          },
+          {
+            "name": "OllamaModel",
+            "type": "Text",
+            "required": false,
+            "defaultValue": "llama3",
+            "description": "Ollama model name"
+          },
+          {
+            "name": "ClaudeAPIKey",
+            "type": "Text",
+            "required": false,
+            "encrypted": true,
+            "description": "Anthropic Claude API key"
+          },
+          {
+            "name": "ClaudeModel",
+            "type": "Text",
+            "required": false,
+            "defaultValue": "claude-3-5-sonnet-20241022",
+            "description": "Claude model identifier"
+          },
+          {
+            "name": "SourceFolderPath",
+            "type": "Text",
+            "required": false,
+            "defaultValue": "/Documents/ToOrganize",
+            "description": "Source folder path in SharePoint"
+          },
+          {
+            "name": "OutputFolderPath",
+            "type": "Text",
+            "required": false,
+            "defaultValue": "/Documents/Organized",
+            "description": "Output folder path in SharePoint"
+          },
+          {
+            "name": "AutoApprove",
+            "type": "Boolean",
+            "required": false,
+            "defaultValue": false,
+            "description": "Auto-approve organization changes"
+          },
+          {
+            "name": "NotificationEmail",
+            "type": "Text",
+            "required": false,
+            "description": "Email for notifications"
+          },
+          {
+            "name": "IsActive",
+            "type": "Boolean",
+            "required": true,
+            "defaultValue": true,
+            "description": "Configuration is active"
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_token_cache_list",
+      "type": "SharePoint.CreateList",
+      "displayName": "Create Token Cache List",
+      "description": "Stores OAuth tokens for reuse",
+      "runAfter": ["create_config_list"],
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "listName": "DocOrganiser_TokenCache",
+        "listTemplate": "GenericList",
+        "columns": [
+          {
+            "name": "Title",
+            "type": "Text",
+            "required": true,
+            "defaultValue": "Current Token"
+          },
+          {
+            "name": "AccessToken",
+            "type": "Note",
+            "required": true,
+            "encrypted": true,
+            "description": "OAuth2 access token"
+          },
+          {
+            "name": "TokenType",
+            "type": "Text",
+            "required": true,
+            "defaultValue": "Bearer",
+            "description": "Token type"
+          },
+          {
+            "name": "ExpiresAt",
+            "type": "DateTime",
+            "required": true,
+            "description": "Token expiration time (UTC)"
+          },
+          {
+            "name": "LastRefreshed",
+            "type": "DateTime",
+            "required": false,
+            "description": "Last token refresh time"
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_job_tracking_list",
+      "type": "SharePoint.CreateList",
+      "displayName": "Create Job Tracking List",
+      "description": "Tracks processing jobs",
+      "runAfter": ["create_token_cache_list"],
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "listName": "DocOrganiser_Jobs",
+        "listTemplate": "GenericList",
+        "columns": [
+          {
+            "name": "Title",
+            "type": "Text",
+            "required": true,
+            "description": "Job ID"
+          },
+          {
+            "name": "Status",
+            "type": "Choice",
+            "required": true,
+            "choices": ["pending", "processing", "review_required", "approved", "executing", "completed", "failed", "cancelled"],
+            "defaultValue": "pending",
+            "description": "Job status"
+          },
+          {
+            "name": "CurrentPhase",
+            "type": "Choice",
+            "required": false,
+            "choices": ["pending", "indexing", "deduplication", "versioning", "organizing", "review", "executing", "packaging", "completed"],
+            "description": "Current processing phase"
+          },
+          {
+            "name": "SourcePath",
+            "type": "Text",
+            "required": true,
+            "description": "Source folder/file path"
+          },
+          {
+            "name": "FileCount",
+            "type": "Number",
+            "required": false,
+            "description": "Number of files processed"
+          },
+          {
+            "name": "ErrorMessage",
+            "type": "Note",
+            "required": false,
+            "description": "Error details if failed"
+          },
+          {
+            "name": "StartedAt",
+            "type": "DateTime",
+            "required": false,
+            "description": "Job start time"
+          },
+          {
+            "name": "CompletedAt",
+            "type": "DateTime",
+            "required": false,
+            "description": "Job completion time"
+          },
+          {
+            "name": "ReportURL",
+            "type": "Hyperlink",
+            "required": false,
+            "description": "Link to processing report"
+          }
+        ]
+      }
+    },
+    {
+      "id": "set_list_permissions",
+      "type": "SharePoint.BreakRoleInheritance",
+      "displayName": "Secure Configuration List",
+      "description": "Restrict access to admins only",
+      "runAfter": ["create_job_tracking_list"],
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "list": "DocOrganiser_Configuration",
+        "copyRoleAssignments": false,
+        "clearSubscriptions": true
+      }
+    },
+    {
+      "id": "grant_admin_access",
+      "type": "SharePoint.GrantListPermissions",
+      "displayName": "Grant Admin Access",
+      "runAfter": ["set_list_permissions"],
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "list": "DocOrganiser_Configuration",
+        "principalId": "@{triggerBody()?['adminGroupId']}",
+        "roleType": "Owner"
+      }
+    },
+    {
+      "id": "create_default_config",
+      "type": "SharePoint.CreateItem",
+      "displayName": "Create Default Configuration",
+      "runAfter": ["grant_admin_access"],
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "list": "DocOrganiser_Configuration",
+        "item": {
+          "Title": "Default Configuration",
+          "TenantID": "@{triggerBody()?['tenantId']}",
+          "ClientID": "@{triggerBody()?['clientId']}",
+          "ClientSecret": "@{triggerBody()?['clientSecret']}",
+          "IsActive": true
+        }
+      }
+    },
+    {
+      "id": "create_default_token_entry",
+      "type": "SharePoint.CreateItem",
+      "displayName": "Create Default Token Entry",
+      "runAfter": ["create_default_config"],
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "list": "DocOrganiser_TokenCache",
+        "item": {
+          "Title": "Current Token",
+          "AccessToken": "placeholder",
+          "TokenType": "Bearer",
+          "ExpiresAt": "@{utcNow()}"
+        }
+      }
+    },
+    {
+      "id": "send_completion_email",
+      "type": "Office365.SendEmail",
+      "displayName": "Send Setup Completion Email",
+      "runAfter": ["create_default_token_entry"],
+      "inputs": {
+        "to": "@{triggerBody()?['adminEmail']}",
+        "subject": "DocOrganiser - SharePoint Schema Initialized",
+        "body": "<h2>SharePoint Schema Successfully Created</h2><p>The following lists have been created:</p><ul><li>DocOrganiser_Configuration - API credentials and settings</li><li>DocOrganiser_TokenCache - OAuth token cache</li><li>DocOrganiser_Jobs - Job tracking</li></ul><p>Next Steps:</p><ol><li>Access the admin interface to configure your API credentials</li><li>Test the 'Get Auth Token' flow</li><li>Process a test folder</li></ol>"
+      }
+    },
+    {
+      "id": "return_success",
+      "type": "Response",
+      "displayName": "Return Success Response",
+      "runAfter": ["send_completion_email"],
+      "inputs": {
+        "statusCode": 200,
+        "body": {
+          "success": true,
+          "message": "SharePoint schema initialized successfully",
+          "lists_created": [
+            "DocOrganiser_Configuration",
+            "DocOrganiser_TokenCache",
+            "DocOrganiser_Jobs"
+          ]
+        }
+      }
+    }
+  ],
+  "errorHandling": {
+    "scope": "flow",
+    "runAfterFailure": {
+      "actions": [
+        {
+          "id": "log_error",
+          "type": "SharePoint.CreateItem",
+          "inputs": {
+            "site": "@{triggerBody()?['siteUrl']}",
+            "list": "Site Assets",
+            "item": {
+              "Title": "Schema Init Error - @{utcNow()}",
+              "Body": "@{body('create_config_list')?['error']}"
+            }
+          }
+        },
+        {
+          "id": "send_error_email",
+          "type": "Office365.SendEmail",
+          "inputs": {
+            "to": "@{triggerBody()?['adminEmail']}",
+            "subject": "DocOrganiser - Schema Initialization Failed",
+            "body": "Failed to initialize SharePoint schema. Please check the error logs."
+          }
+        }
+      ]
+    }
+  }
+}

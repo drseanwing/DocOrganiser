@@ -1,0 +1,163 @@
+{
+  "name": "DocOrganiser - Call API With Bearer Token",
+  "description": "Makes authenticated API calls using cached bearer token. Refreshes token if expired.",
+  "version": "1.0.0",
+  "trigger": {
+    "type": "manual",
+    "displayName": "When a HTTP request is received"
+  },
+  "actions": [
+    {
+      "id": "get_cached_token",
+      "type": "SharePoint.GetItem",
+      "displayName": "Get Cached Token",
+      "inputs": {
+        "site": "@{triggerBody()?['siteUrl']}",
+        "list": "DocOrganiser_TokenCache",
+        "id": 1
+      }
+    },
+    {
+      "id": "check_token_expiry",
+      "type": "Condition",
+      "displayName": "Check If Token Expired",
+      "inputs": {
+        "condition": {
+          "expression": "@greater(body('get_cached_token')?['ExpiresAt'], utcNow())"
+        }
+      },
+      "actions": {
+        "ifTrue": [
+          {
+            "id": "use_cached_token",
+            "type": "Compose",
+            "displayName": "Use Cached Token",
+            "inputs": "@body('get_cached_token')?['AccessToken']"
+          }
+        ],
+        "ifFalse": [
+          {
+            "id": "refresh_token",
+            "type": "Workflow",
+            "displayName": "Refresh Token",
+            "inputs": {
+              "host": {
+                "workflow": "DocOrganiser - Get Auth Token"
+              },
+              "body": {
+                "siteUrl": "@{triggerBody()?['siteUrl']}",
+                "adminEmail": "@{triggerBody()?['adminEmail']}"
+              }
+            }
+          },
+          {
+            "id": "use_refreshed_token",
+            "type": "Compose",
+            "displayName": "Use Refreshed Token",
+            "inputs": "@body('refresh_token')?['token']"
+          }
+        ]
+      }
+    },
+    {
+      "id": "set_token_variable",
+      "type": "SetVariable",
+      "displayName": "Set Bearer Token",
+      "runAfter": ["check_token_expiry"],
+      "inputs": {
+        "name": "bearerToken",
+        "value": "@{if(equals(outputs('check_token_expiry'), 'Succeeded'), outputs('use_cached_token'), outputs('use_refreshed_token'))}"
+      }
+    },
+    {
+      "id": "call_api",
+      "type": "Http",
+      "displayName": "Call API Endpoint",
+      "runAfter": ["set_token_variable"],
+      "inputs": {
+        "method": "@{triggerBody()?['method']}",
+        "uri": "@{triggerBody()?['apiUrl']}",
+        "headers": {
+          "Authorization": "Bearer @{variables('bearerToken')}",
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        "body": "@triggerBody()?['requestBody']"
+      }
+    },
+    {
+      "id": "parse_api_response",
+      "type": "ParseJson",
+      "displayName": "Parse API Response",
+      "runAfter": ["call_api"],
+      "inputs": {
+        "content": "@body('call_api')",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "id": "return_response",
+      "type": "Response",
+      "displayName": "Return API Response",
+      "runAfter": ["parse_api_response"],
+      "inputs": {
+        "statusCode": "@outputs('call_api')['statusCode']",
+        "headers": "@outputs('call_api')['headers']",
+        "body": "@body('parse_api_response')"
+      }
+    }
+  ],
+  "errorHandling": {
+    "scope": "action",
+    "actions": {
+      "call_api": {
+        "runAfterFailure": [
+          {
+            "id": "handle_401",
+            "type": "Condition",
+            "displayName": "Handle Unauthorized",
+            "inputs": {
+              "condition": {
+                "expression": "@equals(outputs('call_api')['statusCode'], 401)"
+              }
+            },
+            "actions": {
+              "ifTrue": [
+                {
+                  "id": "force_token_refresh",
+                  "type": "Workflow",
+                  "displayName": "Force Token Refresh",
+                  "inputs": {
+                    "host": {
+                      "workflow": "DocOrganiser - Get Auth Token"
+                    },
+                    "body": {
+                      "siteUrl": "@{triggerBody()?['siteUrl']}",
+                      "adminEmail": "@{triggerBody()?['adminEmail']}"
+                    }
+                  }
+                },
+                {
+                  "id": "retry_api_call",
+                  "type": "Http",
+                  "displayName": "Retry API Call",
+                  "inputs": {
+                    "method": "@{triggerBody()?['method']}",
+                    "uri": "@{triggerBody()?['apiUrl']}",
+                    "headers": {
+                      "Authorization": "Bearer @{body('force_token_refresh')?['token']}",
+                      "Content-Type": "application/json"
+                    },
+                    "body": "@triggerBody()?['requestBody']"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

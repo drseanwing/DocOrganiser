@@ -547,6 +547,45 @@ GROUP BY ds.id, ds.path, ds.purpose, ds.expected_tags
 ORDER BY ds.depth, ds.path;
 
 -- =============================================================================
+-- API CONFIGURATION
+-- Stores API credentials and system settings for admin interface
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS api_configuration (
+    id SERIAL PRIMARY KEY,
+    
+    -- Microsoft Graph API
+    ms_tenant_id VARCHAR(255),
+    ms_client_id VARCHAR(255),
+    ms_client_secret TEXT,                      -- Encrypted
+    
+    -- Ollama
+    ollama_base_url VARCHAR(500) DEFAULT 'http://localhost:11434',
+    ollama_model VARCHAR(100) DEFAULT 'llama3',
+    
+    -- Claude
+    claude_api_key TEXT,                        -- Encrypted
+    claude_model VARCHAR(100) DEFAULT 'claude-3-5-sonnet-20241022',
+    
+    -- Processing settings
+    source_folder_path VARCHAR(500) DEFAULT '/Documents/ToOrganize',
+    output_folder_path VARCHAR(500) DEFAULT '/Documents/Organized',
+    auto_approve BOOLEAN DEFAULT FALSE,
+    notification_email VARCHAR(255),
+    
+    -- System
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_api_configuration_active ON api_configuration(is_active);
+
+-- Insert default configuration
+INSERT INTO api_configuration (is_active) VALUES (TRUE)
+ON CONFLICT DO NOTHING;
+
+-- =============================================================================
 -- TRIGGERS
 -- =============================================================================
 
@@ -569,6 +608,10 @@ CREATE TRIGGER tr_naming_schema_updated
 
 CREATE TRIGGER tr_system_config_updated
     BEFORE UPDATE ON system_config
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER tr_api_configuration_updated
+    BEFORE UPDATE ON api_configuration
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- =============================================================================

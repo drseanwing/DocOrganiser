@@ -383,22 +383,113 @@ class GraphService:
         Returns:
             File metadata dict or None on failure
         """
+        file_size = len(content)
+        
         # For files < 4MB, use simple upload
-        # For larger files, would need to use upload sessions
-        if len(content) > 4 * 1024 * 1024:
-            logger.warning("graph_file_too_large",
-                          size=len(content),
-                          message="Files > 4MB require upload session (not yet implemented)")
+        if file_size < 4 * 1024 * 1024:
+            folder_path = folder_path.strip('/')
+            endpoint = f"/me/drive/root:/{folder_path}/{filename}:/content"
+            
+            return await self._make_request(
+                "PUT",
+                endpoint,
+                content=content
+            )
+        
+        # For files >= 4MB, use upload session
+        return await self._upload_large_file(folder_path, filename, content)
+    
+    async def _upload_large_file(
+        self,
+        folder_path: str,
+        filename: str,
+        content: bytes
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Upload a large file using upload session.
+        
+        Args:
+            folder_path: Target folder path
+            filename: File name
+            content: File content as bytes
+            
+        Returns:
+            File metadata dict or None on failure
+        """
+        try:
+            folder_path = folder_path.strip('/')
+            file_size = len(content)
+            
+            # Step 1: Create upload session
+            endpoint = f"/me/drive/root:/{folder_path}/{filename}:/createUploadSession"
+            session_data = await self._make_request(
+                "POST",
+                endpoint,
+                json_data={
+                    "item": {
+                        "@microsoft.graph.conflictBehavior": "rename"
+                    }
+                }
+            )
+            
+            if not session_data or "uploadUrl" not in session_data:
+                logger.error("upload_session_creation_failed",
+                           folder=folder_path,
+                           filename=filename)
+                return None
+            
+            upload_url = session_data["uploadUrl"]
+            
+            # Step 2: Upload in chunks (4MB chunks)
+            chunk_size = 4 * 1024 * 1024  # 4MB
+            offset = 0
+            
+            while offset < file_size:
+                # Calculate chunk boundaries
+                chunk_end = min(offset + chunk_size, file_size)
+                chunk = content[offset:chunk_end]
+                
+                # Upload chunk
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.put(
+                        upload_url,
+                        headers={
+                            "Content-Length": str(len(chunk)),
+                            "Content-Range": f"bytes {offset}-{chunk_end-1}/{file_size}"
+                        },
+                        content=chunk
+                    )
+                    
+                    if response.status_code == 201 or response.status_code == 200:
+                        # Upload complete
+                        logger.info("large_file_uploaded",
+                                  filename=filename,
+                                  size=file_size)
+                        return response.json()
+                    elif response.status_code == 202:
+                        # Chunk accepted, continue
+                        logger.debug("chunk_uploaded",
+                                   offset=offset,
+                                   chunk_size=len(chunk),
+                                   total=file_size)
+                        offset = chunk_end
+                    else:
+                        logger.error("chunk_upload_failed",
+                                   status=response.status_code,
+                                   offset=offset)
+                        return None
+            
+            logger.info("large_file_upload_completed",
+                       filename=filename,
+                       size=file_size,
+                       chunks=file_size // chunk_size + 1)
+            return None  # Last response should have been 201
+            
+        except Exception as e:
+            logger.error("large_file_upload_error",
+                        error=str(e),
+                        filename=filename)
             return None
-
-        folder_path = folder_path.strip('/')
-        endpoint = f"/me/drive/root:/{folder_path}/{filename}:/content"
-
-        return await self._make_request(
-            "PUT",
-            endpoint,
-            content=content
-        )
 
     async def create_folder(
         self,

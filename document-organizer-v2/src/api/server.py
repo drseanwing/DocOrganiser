@@ -13,12 +13,14 @@ from uuid import uuid4
 import structlog
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
 
 from src.config import get_settings, ProcessingPhase
 from src.main import DocumentOrganizer
+from src.api.admin import router as admin_router
 
 
 # Configure logging
@@ -42,6 +44,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include admin router
+app.include_router(admin_router)
+
+# Serve admin interface
+admin_path = Path(__file__).parent.parent.parent / "admin"
+if admin_path.exists():
+    app.mount("/admin/static", StaticFiles(directory=admin_path / "static"), name="admin_static")
+    
+    @app.get("/admin", tags=["Admin"])
+    async def admin_interface():
+        """Serve the admin configuration interface."""
+        admin_index = admin_path / "index.html"
+        if admin_index.exists():
+            return FileResponse(admin_index)
+        raise HTTPException(status_code=404, detail="Admin interface not found")
 
 # Database engine (lazy-loaded)
 _engine = None
@@ -142,11 +160,28 @@ async def process_job_async(job_id: str, source_path: str, skip_phases: Optional
 
         logger.info("background_job_completed", job_id=job_id, result=result)
 
-        # TODO: Call callback URL if configured
+        # Call callback URL if configured
         settings = get_settings()
         if settings.callback_url:
-            # Would make HTTP POST to callback_url with result
-            pass
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=30) as client:
+                    callback_data = {
+                        "job_id": job_id,
+                        "status": "completed",
+                        "result": result
+                    }
+                    response = await client.post(
+                        settings.callback_url,
+                        json=callback_data
+                    )
+                    logger.info("callback_sent", 
+                              url=settings.callback_url, 
+                              status_code=response.status_code)
+            except Exception as e:
+                logger.error("callback_failed", 
+                           url=settings.callback_url, 
+                           error=str(e))
 
     except Exception as e:
         logger.error("background_job_failed", job_id=job_id, error=str(e))

@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocOrganiser - Admin Configuration</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 35px;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="password"],
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="email"]:focus,
+        input[type="password"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-test {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-test:hover {
+            background: #45a049;
+        }
+
+        .status-panel {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            margin-bottom: 10px;
+            background: white;
+            border-radius: 6px;
+            border-left: 4px solid #ddd;
+        }
+
+        .status-item.success {
+            border-left-color: #4CAF50;
+        }
+
+        .status-item.error {
+            border-left-color: #f44336;
+        }
+
+        .status-label {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .status-value {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗂️ DocOrganiser</h1>
+            <p>Admin Configuration Panel</p>
+        </div>
+
+        <div class="content">
+            <div id="alertContainer"></div>
+
+            <form id="configForm">
+                <!-- Microsoft Graph API Section -->
+                <div class="section">
+                    <div class="section-title">Microsoft Graph API</div>
+                    
+                    <div class="form-group">
+                        <label for="msTenantId">Tenant ID</label>
+                        <input type="text" id="msTenantId" name="ms_tenant_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                        <div class="help-text">Azure AD Tenant ID from Azure Portal</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="msClientId">Client ID</label>
+                        <input type="text" id="msClientId" name="ms_client_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                        <div class="help-text">Application (client) ID from Azure Portal</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="msClientSecret">Client Secret</label>
+                        <input type="password" id="msClientSecret" name="ms_client_secret" placeholder="Enter new secret or leave blank to keep existing">
+                        <div class="help-text">Client secret from Azure Portal (leave blank to keep current)</div>
+                    </div>
+                </div>
+
+                <!-- Ollama Section -->
+                <div class="section">
+                    <div class="section-title">Ollama (Local LLM)</div>
+                    
+                    <div class="form-group">
+                        <label for="ollamaBaseUrl">Ollama Base URL</label>
+                        <input type="text" id="ollamaBaseUrl" name="ollama_base_url" value="http://localhost:11434">
+                        <div class="help-text">Ollama service endpoint (e.g., http://ollama:11434)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ollamaModel">Ollama Model</label>
+                        <select id="ollamaModel" name="ollama_model">
+                            <option value="llama3">llama3</option>
+                            <option value="mistral">mistral</option>
+                            <option value="mixtral">mixtral</option>
+                            <option value="llama2">llama2</option>
+                        </select>
+                        <div class="help-text">Model for content summarization</div>
+                    </div>
+                </div>
+
+                <!-- Claude API Section -->
+                <div class="section">
+                    <div class="section-title">Claude API (Complex Reasoning)</div>
+                    
+                    <div class="form-group">
+                        <label for="claudeApiKey">Claude API Key</label>
+                        <input type="password" id="claudeApiKey" name="claude_api_key" placeholder="sk-ant-...">
+                        <div class="help-text">Anthropic API key (leave blank to keep current)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="claudeModel">Claude Model</label>
+                        <select id="claudeModel" name="claude_model">
+                            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                            <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                            <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                        </select>
+                        <div class="help-text">Model for organization planning</div>
+                    </div>
+                </div>
+
+                <!-- Processing Settings Section -->
+                <div class="section">
+                    <div class="section-title">Processing Settings</div>
+                    
+                    <div class="form-group">
+                        <label for="sourceFolderPath">Source Folder Path</label>
+                        <input type="text" id="sourceFolderPath" name="source_folder_path" value="/Documents/ToOrganize">
+                        <div class="help-text">Default source folder in SharePoint/OneDrive</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="outputFolderPath">Output Folder Path</label>
+                        <input type="text" id="outputFolderPath" name="output_folder_path" value="/Documents/Organized">
+                        <div class="help-text">Default output folder for organized files</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="notificationEmail">Notification Email</label>
+                        <input type="email" id="notificationEmail" name="notification_email" placeholder="admin@example.com">
+                        <div class="help-text">Email address for notifications</div>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="autoApprove" name="auto_approve">
+                            <label for="autoApprove">Auto-approve organization changes</label>
+                        </div>
+                        <div class="help-text">Automatically execute changes without manual review</div>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button type="button" class="btn-secondary" onclick="loadConfiguration()">Reset</button>
+                    <button type="button" class="btn-test" onclick="testConnectivity()">Test Connections</button>
+                    <button type="submit" class="btn-primary">Save Configuration</button>
+                </div>
+            </form>
+
+            <div class="loading" id="loadingIndicator">
+                <div class="spinner"></div>
+                <p style="margin-top: 12px; color: #666;">Processing...</p>
+            </div>
+
+            <div class="status-panel" id="statusPanel" style="display: none;">
+                <div class="section-title">Connection Status</div>
+                <div id="statusResults"></div>
+            </div>
+        </div>
+
+        <div class="footer">
+            DocOrganiser v2.0 | Admin Configuration Panel<br>
+            Configure API credentials and system settings
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = window.location.origin;
+
+        // Show alert message
+        function showAlert(message, type = 'info') {
+            const alertContainer = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alertContainer.appendChild(alert);
+            
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        // Show/hide loading indicator
+        function setLoading(isLoading) {
+            const loading = document.getElementById('loadingIndicator');
+            const form = document.getElementById('configForm');
+            
+            if (isLoading) {
+                loading.classList.add('active');
+                form.style.display = 'none';
+            } else {
+                loading.classList.remove('active');
+                form.style.display = 'block';
+            }
+        }
+
+        // Load configuration from API
+        async function loadConfiguration() {
+            setLoading(true);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/admin/config`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const config = await response.json();
+                
+                // Populate form fields
+                document.getElementById('msTenantId').value = config.ms_tenant_id || '';
+                document.getElementById('msClientId').value = config.ms_client_id || '';
+                document.getElementById('msClientSecret').value = ''; // Never populate secrets
+                document.getElementById('ollamaBaseUrl').value = config.ollama_base_url || 'http://localhost:11434';
+                document.getElementById('ollamaModel').value = config.ollama_model || 'llama3';
+                document.getElementById('claudeApiKey').value = ''; // Never populate secrets
+                document.getElementById('claudeModel').value = config.claude_model || 'claude-3-5-sonnet-20241022';
+                document.getElementById('sourceFolderPath').value = config.source_folder_path || '/Documents/ToOrganize';
+                document.getElementById('outputFolderPath').value = config.output_folder_path || '/Documents/Organized';
+                document.getElementById('notificationEmail').value = config.notification_email || '';
+                document.getElementById('autoApprove').checked = config.auto_approve || false;
+                
+                showAlert('Configuration loaded successfully', 'success');
+            } catch (error) {
+                console.error('Error loading configuration:', error);
+                showAlert(`Failed to load configuration: ${error.message}`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Save configuration
+        async function saveConfiguration(event) {
+            event.preventDefault();
+            setLoading(true);
+            
+            try {
+                const formData = new FormData(event.target);
+                const config = {};
+                
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'auto_approve') {
+                        config[key] = document.getElementById('autoApprove').checked;
+                    } else if (value.trim() !== '' && !value.startsWith('****')) {
+                        config[key] = value;
+                    }
+                }
+                
+                const response = await fetch(`${API_BASE_URL}/admin/config`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || `HTTP ${response.status}`);
+                }
+                
+                showAlert('Configuration saved successfully!', 'success');
+                
+                // Reload configuration to show masked secrets
+                await loadConfiguration();
+            } catch (error) {
+                console.error('Error saving configuration:', error);
+                showAlert(`Failed to save configuration: ${error.message}`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Test connectivity
+        async function testConnectivity() {
+            setLoading(true);
+            document.getElementById('statusPanel').style.display = 'none';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/admin/test-connectivity`, {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                // Display results
+                const resultsContainer = document.getElementById('statusResults');
+                resultsContainer.innerHTML = '';
+                
+                data.results.forEach(result => {
+                    const statusItem = document.createElement('div');
+                    statusItem.className = `status-item ${result.status}`;
+                    
+                    const label = document.createElement('span');
+                    label.className = 'status-label';
+                    label.textContent = result.service;
+                    
+                    const value = document.createElement('span');
+                    value.className = 'status-value';
+                    
+                    if (result.status === 'success') {
+                        value.textContent = `✓ ${result.message}`;
+                        if (result.response_time_ms) {
+                            value.textContent += ` (${result.response_time_ms.toFixed(0)}ms)`;
+                        }
+                    } else {
+                        value.textContent = `✗ ${result.message}`;
+                    }
+                    
+                    statusItem.appendChild(label);
+                    statusItem.appendChild(value);
+                    resultsContainer.appendChild(statusItem);
+                });
+                
+                document.getElementById('statusPanel').style.display = 'block';
+                showAlert('Connectivity tests completed', 'info');
+            } catch (error) {
+                console.error('Error testing connectivity:', error);
+                showAlert(`Failed to test connectivity: ${error.message}`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Set up form submission
+        document.getElementById('configForm').addEventListener('submit', saveConfiguration);
+
+        // Load configuration on page load
+        window.addEventListener('DOMContentLoaded', loadConfiguration);
+    </script>
+</body>
+</html>
