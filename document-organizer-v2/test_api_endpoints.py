@@ -383,37 +383,21 @@ if __name__ == "__main__":
     print("=" * 60)
     print()
 
-    # Run all tests
-    import unittest
-
-    # Create test suite
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-
-    # Add test classes
-    for test_class in [
-        TestHealthEndpoint,
-        TestJobTriggerEndpoint,
-        TestJobStatusEndpoint,
-        TestJobApprovalEndpoint,
-        TestJobReportEndpoint,
-        TestAPIAuthentication,
-        TestPathValidation,
-    ]:
-        tests = loader.loadTestsFromTestCase(test_class)
-        suite.addTests(tests)
-
-    # Run with verbosity
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
+    # Run tests with pytest
+    exit_code = pytest.main([
+        __file__,
+        "-v",
+        "--tb=short",
+        "--no-header"
+    ])
 
     # Print summary
     print()
     print("=" * 60)
-    print(f"Tests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
+    if exit_code == 0:
+        print("✓ ALL TESTS PASSED")
+    else:
+        print("✗ SOME TESTS FAILED")
     print("=" * 60)
 
-    # Exit with appropriate code
-    sys.exit(0 if result.wasSuccessful() else 1)
+    sys.exit(exit_code)
