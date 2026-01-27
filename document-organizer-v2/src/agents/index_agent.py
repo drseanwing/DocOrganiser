@@ -371,7 +371,7 @@ Respond ONLY with the JSON, no other text."""
         
         try:
             # Generate a unique file_id from path (since we don't have OneDrive IDs)
-            file_id = hashlib.md5(relative_path.encode()).hexdigest()
+            file_id = hashlib.md5(relative_path.encode(), usedforsecurity=False).hexdigest()
             
             session.execute(
                 text("""
