@@ -550,7 +550,7 @@ REASONING: <your explanation>"""
                             idx = int(match.group())
                             if 0 <= idx < len(files):
                                 current_index = idx
-                    except:
+                    except (ValueError, AttributeError):
                         pass
                 elif line.startswith('REASONING:'):
                     reasoning = line.split(':', 1)[1].strip()
@@ -590,7 +590,7 @@ REASONING: <your explanation>"""
             if version_type in ('version_number', 'revision_number', 'copy_number'):
                 try:
                     return (1, int(version_value), 0, file.get('source_modified_at', datetime.min))
-                except:
+                except (ValueError, TypeError):
                     pass
             
             # Priority 2: Dates
@@ -601,7 +601,7 @@ REASONING: <your explanation>"""
                     else:  # date_compact
                         date_obj = datetime.strptime(version_value, '%Y%m%d')
                     return (2, 0, 0, date_obj)
-                except:
+                except (ValueError, TypeError):
                     pass
             
             # Priority 3: Status markers
@@ -701,7 +701,7 @@ REASONING: <your explanation>"""
                             version_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                         else:
                             version_date = datetime.strptime(date_str, '%Y%m%d').date()
-                    except:
+                    except (ValueError, TypeError, KeyError):
                         pass
                 
                 # Generate proposed names for archived versions

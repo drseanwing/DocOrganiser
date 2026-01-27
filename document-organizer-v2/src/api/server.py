@@ -5,16 +5,21 @@ Provides HTTP API for triggering document processing jobs and checking status.
 """
 
 import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
 import structlog
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import create_engine, text
 
 from src.config import get_settings, ProcessingPhase
@@ -23,6 +28,9 @@ from src.main import DocumentOrganizer
 
 # Configure logging
 logger = structlog.get_logger("api")
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 # Create FastAPI app
 app = FastAPI(
@@ -34,13 +42,69 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 
-# Add CORS middleware
+# Add rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Security: API Key authentication
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: Optional[str] = Security(API_KEY_HEADER)) -> bool:
+    """
+    Verify API key for protected endpoints.
+
+    Returns True if no API key is configured (development mode) or if key is valid.
+    Raises HTTPException if key is configured but invalid/missing.
+    """
+    settings = get_settings()
+    configured_key = settings.api_key
+
+    # If no API key is configured, allow access (development mode)
+    if not configured_key:
+        logger.warning("api_key_not_configured",
+                      message="API key not set - running in development mode")
+        return True
+
+    # API key is configured - require valid key
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="API key required",
+            headers={"WWW-Authenticate": "API key"}
+        )
+
+    if api_key != configured_key:
+        logger.warning("invalid_api_key_attempt", provided_key_prefix=api_key[:8] + "..." if len(api_key) > 8 else "***")
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key"
+        )
+
+    return True
+
+
+# Configure CORS with explicit origins (security fix)
+def get_cors_origins():
+    """Get allowed CORS origins from settings."""
+    settings = get_settings()
+    origins = settings.cors_origins
+    if not origins:
+        # Default to restrictive settings in production
+        logger.warning("cors_origins_not_configured",
+                      message="CORS origins not set - using restrictive defaults")
+        return []
+    return [origin.strip() for origin in origins.split(",") if origin.strip()]
+
+
+# Add CORS middleware with secure configuration
+cors_origins = get_cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure based on your needs
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins if cors_origins else ["http://localhost:3000", "http://localhost:8080"],
+    allow_credentials=False,  # Security: don't allow credentials with wildcards
+    allow_methods=["GET", "POST"],
+    allow_headers=["X-API-Key", "Content-Type"],
 )
 
 # Database engine (lazy-loaded)
@@ -169,10 +233,60 @@ async def health_check():
     )
 
 
+def validate_path(path_str: str) -> Path:
+    """
+    Validate and sanitize input path to prevent path traversal attacks.
+
+    Args:
+        path_str: Input path string
+
+    Returns:
+        Validated Path object
+
+    Raises:
+        HTTPException: If path is invalid or outside allowed directories
+    """
+    settings = get_settings()
+    allowed_base_paths = [
+        Path(settings.data_input_path).resolve(),
+        Path(settings.data_source_path).resolve(),
+    ]
+
+    try:
+        # Resolve to absolute path
+        resolved_path = Path(path_str).resolve()
+
+        # Check if path is within allowed directories
+        is_allowed = any(
+            str(resolved_path).startswith(str(base_path))
+            for base_path in allowed_base_paths
+        )
+
+        if not is_allowed:
+            logger.warning("path_traversal_blocked",
+                          requested_path=path_str,
+                          resolved_path=str(resolved_path))
+            raise HTTPException(
+                status_code=400,
+                detail="Path not allowed. Files must be in /data/input or /data/source"
+            )
+
+        return resolved_path
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid path: {path_str}"
+        )
+
+
 @app.post("/webhook/job", response_model=JobTriggerResponse, tags=["Jobs"])
+@limiter.limit("10/minute")
 async def trigger_job(
-    request: JobTriggerRequest,
-    background_tasks: BackgroundTasks
+    request: Request,
+    job_request: JobTriggerRequest,
+    background_tasks: BackgroundTasks,
+    _: bool = Depends(verify_api_key)
 ):
     """
     Trigger a new document processing job.
@@ -181,24 +295,26 @@ async def trigger_job(
     Returns immediately with a job_id for status tracking.
 
     Args:
-        request: Job trigger request with source_path
+        request: FastAPI request object (for rate limiting)
+        job_request: Job trigger request with source_path
         background_tasks: FastAPI background tasks
 
     Returns:
         Job trigger response with job_id
     """
-    # Validate source path exists
-    source_path = Path(request.source_path)
+    # Validate and sanitize source path (prevents path traversal)
+    source_path = validate_path(job_request.source_path)
+
     if not source_path.exists():
         raise HTTPException(
             status_code=400,
-            detail=f"Source path does not exist: {request.source_path}"
+            detail=f"Source path does not exist: {job_request.source_path}"
         )
 
     if not source_path.is_file() or source_path.suffix.lower() != ".zip":
         raise HTTPException(
             status_code=400,
-            detail=f"Source path must be a ZIP file: {request.source_path}"
+            detail=f"Source path must be a ZIP file: {job_request.source_path}"
         )
 
     try:
@@ -241,7 +357,7 @@ async def trigger_job(
             process_job_async,
             job_id=job_id,
             source_path=str(source_path),
-            skip_phases=request.skip_phases
+            skip_phases=job_request.skip_phases
         )
 
         logger.info("job_triggered", job_id=job_id, source_path=str(source_path))
@@ -261,7 +377,12 @@ async def trigger_job(
 
 
 @app.get("/jobs/{job_id}/status", response_model=JobStatusResponse, tags=["Jobs"])
-async def get_job_status(job_id: str):
+@limiter.limit("60/minute")
+async def get_job_status(
+    request: Request,
+    job_id: str,
+    _: bool = Depends(verify_api_key)
+):
     """
     Get the current status of a processing job.
 
@@ -314,10 +435,13 @@ async def get_job_status(job_id: str):
 
 
 @app.post("/jobs/{job_id}/approve", response_model=JobApprovalResponse, tags=["Jobs"])
+@limiter.limit("10/minute")
 async def approve_job(
+    request: Request,
     job_id: str,
-    request: JobApprovalRequest,
-    background_tasks: BackgroundTasks
+    approval_request: JobApprovalRequest,
+    background_tasks: BackgroundTasks,
+    _: bool = Depends(verify_api_key)
 ):
     """
     Approve a job for execution.
@@ -357,7 +481,7 @@ async def approve_job(
                 detail=f"Job is not awaiting approval. Current status: {status}"
             )
 
-        if not request.approved:
+        if not approval_request.approved:
             # Cancelled by user
             with engine.connect() as conn:
                 conn.execute(
@@ -421,7 +545,12 @@ async def approve_job(
 
 
 @app.get("/jobs/{job_id}/report", response_model=JobReportResponse, tags=["Jobs"])
-async def get_job_report(job_id: str):
+@limiter.limit("30/minute")
+async def get_job_report(
+    request: Request,
+    job_id: str,
+    _: bool = Depends(verify_api_key)
+):
     """
     Get processing report for a job.
 
