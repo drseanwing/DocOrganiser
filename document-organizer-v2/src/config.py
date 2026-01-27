@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     postgres_port: int = Field(default=5432, description="PostgreSQL port")
     postgres_db: str = Field(default="document_organizer", description="Database name")
     postgres_user: str = Field(default="doc_organizer", description="Database user")
-    postgres_password: str = Field(description="Database password (required - set via POSTGRES_PASSWORD env var)")
+    postgres_password: str = Field(default="", description="Database password (set via POSTGRES_PASSWORD env var)")
     
     @property
     def database_url(self) -> str:
