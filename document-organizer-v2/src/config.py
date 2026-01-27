@@ -62,13 +62,14 @@ class Settings(BaseSettings):
     postgres_port: int = Field(default=5432, description="PostgreSQL port")
     postgres_db: str = Field(default="document_organizer", description="Database name")
     postgres_user: str = Field(default="doc_organizer", description="Database user")
-    postgres_password: str = Field(default="changeme", description="Database password")
+    postgres_password: Optional[str] = Field(default=None, description="Database password (set via POSTGRES_PASSWORD env var)")
     
     @property
     def database_url(self) -> str:
         """Construct database connection URL."""
+        password = self.postgres_password or ""
         return (
-            f"postgresql://{self.postgres_user}:{self.postgres_password}"
+            f"postgresql://{self.postgres_user}:{password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
     
@@ -174,6 +175,22 @@ class Settings(BaseSettings):
     callback_url: Optional[str] = Field(
         default=None,
         description="Webhook URL to call on completion"
+    )
+
+    # -------------------------------------------------------------------------
+    # API Security
+    # -------------------------------------------------------------------------
+    api_key: Optional[str] = Field(
+        default=None,
+        description="API key for authentication (required for production)"
+    )
+    cors_origins: str = Field(
+        default="",
+        description="Comma-separated list of allowed CORS origins"
+    )
+    rate_limit: str = Field(
+        default="100/minute",
+        description="API rate limit (requests/period)"
     )
     
     # -------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import asyncio
 import hashlib
 import zipfile
 from pathlib import Path
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Any
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -80,7 +80,7 @@ class ZipHandler:
         zip_path: Path,
         dest_path: Path,
         calculate_hashes: bool = True
-    ) -> List[Dict[str, any]]:
+    ) -> List[Dict[str, Any]]:
         """
         Extract ZIP file to destination directory.
 
@@ -143,7 +143,7 @@ class ZipHandler:
         zip_path: Path,
         dest_path: Path,
         calculate_hashes: bool
-    ) -> List[Dict[str, any]]:
+    ) -> List[Dict[str, Any]]:
         """
         Synchronous extraction implementation.
 
@@ -162,6 +162,18 @@ class ZipHandler:
             for member in zf.namelist():
                 if self._should_skip_file(member):
                     self.logger.debug("skipping_system_file", file=member)
+                    continue
+
+                # Security: Path traversal protection
+                # Ensure extracted file stays within dest_path
+                member_path = (dest_path / member).resolve()
+                if not str(member_path).startswith(str(dest_path.resolve())):
+                    self.logger.warning(
+                        "path_traversal_blocked",
+                        file=member,
+                        attempted_path=str(member_path),
+                        dest_path=str(dest_path)
+                    )
                     continue
 
                 # Extract the file
@@ -331,7 +343,7 @@ class ZipHandler:
         except Exception as e:
             return False, f"Validation error: {e}"
 
-    async def list_contents(self, zip_path: Path) -> List[Dict[str, any]]:
+    async def list_contents(self, zip_path: Path) -> List[Dict[str, Any]]:
         """
         List contents of ZIP file with metadata.
 
@@ -377,7 +389,7 @@ class ZipHandler:
         except Exception as e:
             raise ZipHandlerError(f"Failed to list ZIP contents: {e}") from e
 
-    def _list_contents_sync(self, zip_path: Path) -> List[Dict[str, any]]:
+    def _list_contents_sync(self, zip_path: Path) -> List[Dict[str, Any]]:
         """
         Synchronous ZIP contents listing implementation.
 

@@ -26,24 +26,33 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY src/ ./src/
 COPY database/ ./database/
 
-# Create data directories
-RUN mkdir -p /data/input /data/source /data/working /data/output /data/reports
+# Security: Create non-root user
+RUN groupadd --gid 1000 docorg && \
+    useradd --uid 1000 --gid docorg --shell /bin/bash --create-home docorg
+
+# Create data directories and set ownership
+RUN mkdir -p /data/input /data/source /data/working /data/output /data/reports && \
+    chown -R docorg:docorg /data /app
 
 # Set environment defaults
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     LOG_LEVEL=INFO
 
-# Health check
+# Security: Switch to non-root user
+USER docorg
+
+# Health check - verify application can start
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+    CMD python -c "from src.config import get_settings; get_settings()" || exit 1
 
 # Default command
 CMD ["python", "-m", "src.main"]

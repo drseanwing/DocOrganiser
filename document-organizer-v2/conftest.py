@@ -90,6 +90,11 @@ def test_settings():
         # Callbacks
         callback_url = None
 
+        # API Security
+        api_key = None
+        cors_origins = "http://localhost:3000"
+        rate_limit = "100/minute"
+
     return MockSettings()
 
 
