@@ -3,6 +3,7 @@
 **Test Date:** 2026-01-28
 **Test Type:** Live processor test with ~30 mixed documents (unzipped)
 **Environment:** Docker container
+**Log File:** `/_docorg_test_processor_logs.txt`
 
 ---
 
@@ -202,6 +203,8 @@ Python Version: 3.11
 Container Base: (verify from Dockerfile)
 Documents: ~30 mixed types (unzipped)
 Input File: OL4-1.0.0.zip
+Error Occurrences: 3 cycles (same error pattern repeated)
+Log File: _docorg_test_processor_logs.txt (94 lines)
 ```
 
 ---
