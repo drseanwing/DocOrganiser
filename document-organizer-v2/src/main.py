@@ -254,9 +254,20 @@ class DocumentOrganizer:
         """Extract ZIP to source directory."""
         source_dir = Path(self.settings.data_source_path)
         
-        # Clear existing source directory
+        # Clear existing source directory contents (not the directory itself)
+        # This is required because /data/source may be a Docker volume mount
+        # that cannot be removed while mounted
         if source_dir.exists():
-            shutil.rmtree(source_dir)
+            for item in source_dir.iterdir():
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+                except OSError as e:
+                    logger.warning("failed_to_clear_item", 
+                                   item=str(item), 
+                                   error=str(e))
         source_dir.mkdir(parents=True, exist_ok=True)
         
         logger.info("extracting_zip", zip_path=zip_path, dest=str(source_dir))
@@ -438,10 +449,20 @@ async def main():
                     result = await organizer.process_zip(str(zip_file))
                     logger.info("processing_result", **result)
                     # Move processed ZIP
-                    zip_file.rename(zip_file.with_suffix('.zip.processed'))
+                    try:
+                        zip_file.rename(zip_file.with_suffix('.zip.processed'))
+                    except PermissionError:
+                        logger.warning("cannot_rename_processed_file",
+                                      path=str(zip_file),
+                                      reason="Permission denied - file left as-is")
                 except Exception as e:
                     logger.error("processing_error", error=str(e))
-                    zip_file.rename(zip_file.with_suffix('.zip.error'))
+                    try:
+                        zip_file.rename(zip_file.with_suffix('.zip.error'))
+                    except PermissionError:
+                        logger.warning("cannot_rename_error_file",
+                                      path=str(zip_file),
+                                      reason="Permission denied - file left as-is")
             
             await asyncio.sleep(10)
     

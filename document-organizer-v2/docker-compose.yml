@@ -96,11 +96,13 @@ services:
       # Webhook callback (optional)
       CALLBACK_URL: ${CALLBACK_URL:-}
     volumes:
-      - ./data/input:/data/input
-      - ./data/source:/data/source
-      - ./data/working:/data/working
-      - ./data/output:/data/output
-      - ./data/reports:/data/reports
+      # Named volumes for rootless Docker compatibility
+      # These volumes are owned by the container user (UID 1000)
+      - data_input:/data/input
+      - data_source:/data/source
+      - data_working:/data/working
+      - data_output:/data/output
+      - data_reports:/data/reports
       - ./src:/app/src:ro
     working_dir: /app
     command: ["python", "-m", "src.main", "--wait"]
@@ -126,6 +128,18 @@ volumes:
     name: doc_organizer_postgres
   ollama_data:
     name: doc_organizer_ollama
+  # Data volumes for processor - named volumes for rootless Docker compatibility
+  # These volumes will be owned by the container user (UID 1000) rather than root
+  data_input:
+    name: doc_organizer_input
+  data_source:
+    name: doc_organizer_source
+  data_working:
+    name: doc_organizer_working
+  data_output:
+    name: doc_organizer_output
+  data_reports:
+    name: doc_organizer_reports
 
 networks:
   default:
