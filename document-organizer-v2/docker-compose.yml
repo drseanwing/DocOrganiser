@@ -5,6 +5,25 @@
 #   docker-compose up -d          # Start all services
 #   docker-compose logs -f        # View logs
 #   docker-compose exec processor python -m src.main  # Run processing
+#
+# Rootless Docker Note:
+#   This configuration uses named volumes for data directories to ensure
+#   proper permissions in rootless Docker environments. To place files
+#   in the input volume, use one of these methods:
+#
+#   Method 1 - docker cp:
+#     docker cp myfile.zip doc_organizer_processor:/data/input/
+#
+#   Method 2 - Temporary container with bind mount:
+#     docker run --rm -v doc_organizer_input:/data/input -v $(pwd):/host \
+#       alpine cp /host/myfile.zip /data/input/
+#
+#   Method 3 - Override with bind mount for development:
+#     In a docker-compose.override.yml file, you can use bind mounts:
+#       services:
+#         processor:
+#           volumes:
+#             - ./data/input:/data/input
 # =============================================================================
 
 version: '3.8'
