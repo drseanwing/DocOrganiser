@@ -521,7 +521,7 @@ Trigger Next Action (if applicable)
 ```json
 {
   "host": "{{ $env.POSTGRES_HOST }}",
-  "port": 5432,
+  "port": 7420,
   "database": "{{ $env.POSTGRES_DB }}",
   "user": "{{ $env.POSTGRES_USER }}",
   "password": "{{ $env.POSTGRES_PASSWORD }}"

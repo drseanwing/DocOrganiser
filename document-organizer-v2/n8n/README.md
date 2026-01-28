@@ -99,7 +99,7 @@ Use n8n cloud service at https://n8n.io - configure webhook URLs to point to you
 3. Configure:
    ```
    Host: postgres (or your database host)
-   Port: 5432
+   Port: 7420
    Database: document_organizer
    User: doc_organizer
    Password: <your password>
@@ -159,7 +159,7 @@ UPLOAD_STRATEGY=extract       # or 'zip-only'
 
 ```bash
 POSTGRES_HOST=postgres
-POSTGRES_PORT=5432
+POSTGRES_PORT=7420
 POSTGRES_DB=document_organizer
 POSTGRES_USER=doc_organizer
 POSTGRES_PASSWORD=changeme
