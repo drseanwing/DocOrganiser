@@ -254,9 +254,29 @@ class DocumentOrganizer:
         """Extract ZIP to source directory."""
         source_dir = Path(self.settings.data_source_path)
         
-        # Clear existing source directory
+        # Clear existing source directory contents (not the directory itself)
+        # This is required because /data/source may be a Docker volume mount
+        # that cannot be removed while mounted
+        clear_failures = []
         if source_dir.exists():
-            shutil.rmtree(source_dir)
+            for item in source_dir.iterdir():
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+                except OSError as e:
+                    logger.warning("failed_to_clear_item", 
+                                   item=str(item), 
+                                   error=str(e))
+                    clear_failures.append(str(item))
+        
+        if clear_failures:
+            logger.error("source_directory_not_fully_cleared",
+                        failed_items=clear_failures,
+                        message="Extraction may produce inconsistent results")
+            raise OSError(f"Failed to clear {len(clear_failures)} item(s) from source directory")
+        
         source_dir.mkdir(parents=True, exist_ok=True)
         
         logger.info("extracting_zip", zip_path=zip_path, dest=str(source_dir))
@@ -428,20 +448,38 @@ async def main():
     if args.wait:
         logger.info("waiting_for_input", 
                    message="Container running. Place ZIP in /data/input to process.")
-        # Simple file watcher
+        # Simple file watcher with tracking of processed/failed files
         input_dir = Path(get_settings().data_input_path)
+        # Track files that couldn't be renamed to avoid infinite reprocessing
+        skipped_files: set[str] = set()
         while True:
             for zip_file in input_dir.glob("*.zip"):
+                # Skip files that we've already processed but couldn't rename
+                if str(zip_file) in skipped_files:
+                    continue
+                    
                 logger.info("found_zip", path=str(zip_file))
                 organizer = DocumentOrganizer()
                 try:
                     result = await organizer.process_zip(str(zip_file))
                     logger.info("processing_result", **result)
                     # Move processed ZIP
-                    zip_file.rename(zip_file.with_suffix('.zip.processed'))
+                    try:
+                        zip_file.rename(zip_file.with_suffix('.zip.processed'))
+                    except PermissionError:
+                        logger.warning("cannot_rename_processed_file",
+                                      path=str(zip_file),
+                                      reason="Permission denied - file added to skip list")
+                        skipped_files.add(str(zip_file))
                 except Exception as e:
                     logger.error("processing_error", error=str(e))
-                    zip_file.rename(zip_file.with_suffix('.zip.error'))
+                    try:
+                        zip_file.rename(zip_file.with_suffix('.zip.error'))
+                    except PermissionError:
+                        logger.warning("cannot_rename_error_file",
+                                      path=str(zip_file),
+                                      reason="Permission denied - file added to skip list")
+                        skipped_files.add(str(zip_file))
             
             await asyncio.sleep(10)
     

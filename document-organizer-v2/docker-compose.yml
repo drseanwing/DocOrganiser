@@ -5,6 +5,25 @@
 #   docker-compose up -d          # Start all services
 #   docker-compose logs -f        # View logs
 #   docker-compose exec processor python -m src.main  # Run processing
+#
+# Rootless Docker Note:
+#   This configuration uses named volumes for data directories to ensure
+#   proper permissions in rootless Docker environments. To place files
+#   in the input volume, use one of these methods:
+#
+#   Method 1 - docker cp:
+#     docker cp myfile.zip doc_organizer_processor:/data/input/
+#
+#   Method 2 - Temporary container with bind mount:
+#     docker run --rm -v doc_organizer_input:/data/input -v $(pwd):/host \
+#       alpine cp /host/myfile.zip /data/input/
+#
+#   Method 3 - Override with bind mount for development:
+#     In a docker-compose.override.yml file, you can use bind mounts:
+#       services:
+#         processor:
+#           volumes:
+#             - ./data/input:/data/input
 # =============================================================================
 
 version: '3.8'
@@ -96,11 +115,13 @@ services:
       # Webhook callback (optional)
       CALLBACK_URL: ${CALLBACK_URL:-}
     volumes:
-      - ./data/input:/data/input
-      - ./data/source:/data/source
-      - ./data/working:/data/working
-      - ./data/output:/data/output
-      - ./data/reports:/data/reports
+      # Named volumes for rootless Docker compatibility
+      # These volumes are owned by the container user (UID 1000)
+      - data_input:/data/input
+      - data_source:/data/source
+      - data_working:/data/working
+      - data_output:/data/output
+      - data_reports:/data/reports
       - ./src:/app/src:ro
     working_dir: /app
     command: ["python", "-m", "src.main", "--wait"]
@@ -126,6 +147,18 @@ volumes:
     name: doc_organizer_postgres
   ollama_data:
     name: doc_organizer_ollama
+  # Data volumes for processor - named volumes for rootless Docker compatibility
+  # These volumes will be owned by the container user (UID 1000) rather than root
+  data_input:
+    name: doc_organizer_input
+  data_source:
+    name: doc_organizer_source
+  data_working:
+    name: doc_organizer_working
+  data_output:
+    name: doc_organizer_output
+  data_reports:
+    name: doc_organizer_reports
 
 networks:
   default:

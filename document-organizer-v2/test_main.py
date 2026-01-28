@@ -248,6 +248,71 @@ class TestZipExtraction:
                 file_names = [f.name for f in files if f.is_file()]
                 assert "document.txt" in file_names
 
+    def test_extract_zip_clears_existing_contents(self, mock_settings, temp_zip, mock_engine):
+        """Test that extraction clears existing directory contents without removing the directory.
+        
+        This is critical for Docker volume mounts where the directory itself cannot be removed.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "source"
+            mock_settings.data_source_path = str(source_path)
+
+            # Pre-create directory with existing files and subdirectory
+            source_path.mkdir(parents=True)
+            (source_path / "old_file.txt").write_text("old content")
+            subdir = source_path / "old_subdir"
+            subdir.mkdir()
+            (subdir / "nested_file.txt").write_text("nested content")
+
+            with patch('src.main.create_engine', return_value=mock_engine):
+                from src.main import DocumentOrganizer
+                organizer = DocumentOrganizer(settings=mock_settings)
+                organizer.job_id = "test-job-123"
+
+                async def run_test():
+                    await organizer._extract_zip(str(temp_zip))
+
+                asyncio.run(run_test())
+
+                # Verify directory still exists (wasn't removed)
+                assert source_path.exists()
+                
+                # Verify old files are gone
+                assert not (source_path / "old_file.txt").exists()
+                assert not (source_path / "old_subdir").exists()
+                
+                # Verify new files are extracted
+                file_names = [f.name for f in source_path.rglob("*") if f.is_file()]
+                assert "document.txt" in file_names
+
+    def test_extract_zip_fails_on_clear_error(self, mock_settings, temp_zip, mock_engine):
+        """Test that extraction fails if directory contents cannot be cleared.
+        
+        This prevents inconsistent state from mixed old and new content.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "source"
+            mock_settings.data_source_path = str(source_path)
+
+            # Pre-create directory with existing file
+            source_path.mkdir(parents=True)
+            (source_path / "old_file.txt").write_text("old content")
+
+            with patch('src.main.create_engine', return_value=mock_engine):
+                from src.main import DocumentOrganizer
+                organizer = DocumentOrganizer(settings=mock_settings)
+                organizer.job_id = "test-job-123"
+
+                # Mock Path.iterdir to return items, and unlink to fail
+                with patch.object(Path, 'unlink', side_effect=OSError("Permission denied")):
+                    async def run_test():
+                        await organizer._extract_zip(str(temp_zip))
+
+                    with pytest.raises(OSError) as exc_info:
+                        asyncio.run(run_test())
+                    
+                    assert "Failed to clear" in str(exc_info.value)
+
 
 # ============================================================================
 # Phase Execution Tests
