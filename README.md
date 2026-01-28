@@ -2,6 +2,7 @@
 
 An AI-powered document organization system that autonomously renames, categorizes, and reorganizes bulky file system directories.
 
+
 ## Overview
 
 DocOrganiser uses a multi-agent architecture to process documents from OneDrive/SharePoint, leveraging local LLM inference (Ollama) and cloud LLMs (Claude) to make intelligent decisions about document organization.
