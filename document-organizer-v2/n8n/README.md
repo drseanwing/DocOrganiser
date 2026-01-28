@@ -99,7 +99,7 @@ Use n8n cloud service at https://n8n.io - configure webhook URLs to point to you
 3. Configure:
    ```
    Host: postgres (or your database host)
-   Port: 7420
+   Port: 5432 (use 7420 if connecting from host machine via localhost)
    Database: document_organizer
    User: doc_organizer
    Password: <your password>
@@ -159,7 +159,7 @@ UPLOAD_STRATEGY=extract       # or 'zip-only'
 
 ```bash
 POSTGRES_HOST=postgres
-POSTGRES_PORT=7420
+POSTGRES_PORT=5432  # Internal Docker network port (use 7420 for host connections to localhost)
 POSTGRES_DB=document_organizer
 POSTGRES_USER=doc_organizer
 POSTGRES_PASSWORD=changeme

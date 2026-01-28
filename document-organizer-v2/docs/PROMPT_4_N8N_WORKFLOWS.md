@@ -521,12 +521,13 @@ Trigger Next Action (if applicable)
 ```json
 {
   "host": "{{ $env.POSTGRES_HOST }}",
-  "port": 7420,
+  "port": "{{ $env.POSTGRES_PORT }}",
   "database": "{{ $env.POSTGRES_DB }}",
   "user": "{{ $env.POSTGRES_USER }}",
   "password": "{{ $env.POSTGRES_PASSWORD }}"
 }
 ```
+Note: Use POSTGRES_PORT=5432 for internal Docker network connections (POSTGRES_HOST=postgres) or POSTGRES_PORT=7420 for host connections (POSTGRES_HOST=localhost).
 
 ### Microsoft OAuth (if using n8n's built-in)
 - Configure in n8n UI
