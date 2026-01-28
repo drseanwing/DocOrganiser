@@ -162,7 +162,7 @@ CLAUDE_MAX_TOKENS=16000                # Max response tokens
 
 # Database Configuration
 POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
+POSTGRES_PORT=7420
 POSTGRES_DB=document_organizer
 POSTGRES_USER=doc_organizer
 POSTGRES_PASSWORD=changeme
