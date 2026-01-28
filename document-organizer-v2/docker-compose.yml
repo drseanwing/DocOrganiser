@@ -44,7 +44,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"  # Security: bind to localhost only
+      - "127.0.0.1:${POSTGRES_PORT:-7420}:5432"  # Security: bind to localhost only
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-doc_organizer} -d ${POSTGRES_DB:-document_organizer}"]
       interval: 10s
@@ -61,7 +61,7 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     ports:
-      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"  # Security: bind to localhost only
+      - "127.0.0.1:${OLLAMA_PORT:-7421}:11434"  # Security: bind to localhost only
     # Uncomment for GPU support:
     # deploy:
     #   resources:
@@ -138,7 +138,7 @@ services:
     depends_on:
       - postgres
     ports:
-      - "127.0.0.1:${ADMINER_PORT:-8080}:8080"  # Security: bind to localhost only
+      - "127.0.0.1:${ADMINER_PORT:-7423}:8080"  # Security: bind to localhost only
     profiles:
       - debug
 

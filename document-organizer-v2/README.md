@@ -96,8 +96,8 @@ cp .env.example .env
 Update `.env` for local development:
 ```env
 POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-OLLAMA_HOST=http://localhost:11434
+POSTGRES_PORT=7420
+OLLAMA_HOST=http://localhost:7421
 ANTHROPIC_API_KEY=your-api-key-here
 ```
 
@@ -120,7 +120,7 @@ Access the database UI:
 ```bash
 docker-compose --profile debug up -d adminer
 ```
-Then open http://localhost:8080
+Then open http://localhost:7423
 
 ## Production Deployment
 
@@ -223,7 +223,7 @@ docker-compose logs postgres
 ### Ollama Not Responding
 ```bash
 # Check Ollama health
-curl http://localhost:11434/api/tags
+curl http://localhost:7421/api/tags
 
 # View Ollama logs
 docker-compose logs ollama
