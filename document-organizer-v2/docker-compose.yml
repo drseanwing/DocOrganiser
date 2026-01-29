@@ -6,6 +6,9 @@
 #   docker-compose logs -f        # View logs
 #   docker-compose exec processor python -m src.main  # Run processing
 #
+# Input: The processor accepts BOTH zip files and loose files in /data/input.
+#   Loose files are auto-packaged into a ZIP and processed through the pipeline.
+#
 # Rootless Docker Note:
 #   This configuration uses named volumes for data directories to ensure
 #   proper permissions in rootless Docker environments. To place files
@@ -13,6 +16,7 @@
 #
 #   Method 1 - docker cp:
 #     docker cp myfile.zip doc_organizer_processor:/data/input/
+#     docker cp myfile.docx doc_organizer_processor:/data/input/
 #
 #   Method 2 - Temporary container with bind mount:
 #     docker run --rm -v doc_organizer_input:/data/input -v $(pwd):/host \
@@ -71,10 +75,11 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      start_period: 60s
+      retries: 5
 
   # ---------------------------------------------------------------------------
   # Document Processor - Main Application
