@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Optional
 import json
 
+import httpx
 import logging
 import structlog
 from sqlalchemy import create_engine, text
@@ -460,6 +461,34 @@ async def main():
         logger.info("processor_started",
                     input_dir=str(input_dir),
                     message="Watching for input. Place ZIP files or loose files in the input directory.")
+
+        # Ensure the Ollama model is available before accepting work.
+        from src.services.ollama_service import OllamaService
+        ollama = OllamaService(settings)
+        logger.info("checking_ollama_model", model=settings.ollama_model)
+        if not await ollama.health_check():
+            logger.warning("ollama_not_reachable",
+                          message="Ollama is not reachable yet -- will retry when processing starts.")
+        else:
+            # Check if model is already pulled
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{settings.ollama_host}/api/tags")
+                models = [m["name"] for m in resp.json().get("models", [])] if resp.status_code == 200 else []
+            model_base = settings.ollama_model.split(':')[0]
+            model_found = any(settings.ollama_model in m or m.startswith(model_base) for m in models)
+            if not model_found:
+                logger.info("pulling_ollama_model",
+                           model=settings.ollama_model,
+                           message="Model not found -- pulling (this may take several minutes on first run).")
+                pulled = await ollama.pull_model()
+                if pulled:
+                    logger.info("model_pull_complete", model=settings.ollama_model)
+                else:
+                    logger.error("model_pull_failed",
+                                model=settings.ollama_model,
+                                message="Could not pull model. Summarisation will be skipped.")
+            else:
+                logger.info("ollama_model_ready", model=settings.ollama_model, available=models)
 
         # Track ZIP files that have been processed or couldn't be renamed
         skipped_zips: set[str] = set()
