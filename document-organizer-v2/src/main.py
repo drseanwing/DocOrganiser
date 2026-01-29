@@ -15,6 +15,7 @@ import asyncio
 import argparse
 import os
 import sys
+import tempfile
 import zipfile
 import shutil
 from pathlib import Path
@@ -460,16 +461,22 @@ async def main():
                     input_dir=str(input_dir),
                     message="Watching for input. Place ZIP files or loose files in the input directory.")
 
-        # Suffixes used as markers -- never treat these as input
-        _marker_suffixes = {'.processed', '.error', '.packed'}
+        # Track ZIP files that have been processed or couldn't be renamed
+        skipped_zips: set[str] = set()
 
-        # Track files that couldn't be renamed to avoid infinite reprocessing
-        skipped_files: set[str] = set()
+        # Track loose files by (name, size, mtime) so we never re-process
+        # the same file even when the input volume is read-only.
+        processed_loose: set[tuple[str, int, float]] = set()
+
+        def _file_identity(f: Path) -> tuple[str, int, float]:
+            """Return (name, size, mtime) tuple to identify a file."""
+            st = f.stat()
+            return (f.name, st.st_size, st.st_mtime)
 
         while True:
             # ---- 1. Process ZIP files ----
             for zip_file in input_dir.glob("*.zip"):
-                if str(zip_file) in skipped_files:
+                if str(zip_file) in skipped_zips:
                     continue
 
                 logger.info("found_zip", path=str(zip_file))
@@ -483,7 +490,7 @@ async def main():
                         logger.warning("cannot_rename_processed_file",
                                       path=str(zip_file),
                                       reason="Permission denied - file added to skip list")
-                        skipped_files.add(str(zip_file))
+                        skipped_zips.add(str(zip_file))
                 except Exception as e:
                     logger.error("processing_error", error=str(e))
                     try:
@@ -492,60 +499,62 @@ async def main():
                         logger.warning("cannot_rename_error_file",
                                       path=str(zip_file),
                                       reason="Permission denied - file added to skip list")
-                        skipped_files.add(str(zip_file))
+                        skipped_zips.add(str(zip_file))
 
             # ---- 2. Auto-package loose files ----
-            loose_files = [
-                f for f in input_dir.iterdir()
-                if f.is_file()
-                and f.suffix != '.zip'
-                and f.suffix not in _marker_suffixes
-                and not f.name.endswith('.zip.processed')
-                and not f.name.endswith('.zip.error')
-                and not f.name.startswith('.')
-                and str(f) not in skipped_files
-            ]
+            # Collect non-zip, non-hidden files that haven't been processed yet
+            loose_files = []
+            for f in input_dir.iterdir():
+                if not f.is_file():
+                    continue
+                if f.suffix == '.zip' or f.name.startswith('.'):
+                    continue
+                # Skip marker files left by previous runs (if volume is writable)
+                if f.name.endswith(('.processed', '.error', '.packed')):
+                    continue
+                try:
+                    ident = _file_identity(f)
+                except OSError:
+                    continue
+                if ident in processed_loose:
+                    continue
+                loose_files.append((f, ident))
 
             if loose_files:
+                file_names = [f.name for f, _ in loose_files]
                 logger.info("found_loose_files",
                            count=len(loose_files),
-                           files=[f.name for f in loose_files[:20]])
+                           files=file_names[:20])
 
+                # Write the ZIP to /tmp -- the input volume may be read-only
                 timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                auto_zip_path = input_dir / f"auto_packaged_{timestamp}.zip"
+                tmp_dir = Path(tempfile.mkdtemp(prefix="docorg_"))
+                auto_zip_path = tmp_dir / f"auto_packaged_{timestamp}.zip"
 
                 try:
-                    # Package loose files into a ZIP
                     with zipfile.ZipFile(auto_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                        for f in loose_files:
+                        for f, _ in loose_files:
                             zf.write(f, f.name)
                     logger.info("auto_packaged",
                                zip_path=str(auto_zip_path),
                                file_count=len(loose_files))
 
-                    # Mark originals so they aren't re-packed
-                    for f in loose_files:
-                        try:
-                            f.rename(input_dir / (f.name + '.packed'))
-                        except PermissionError:
-                            skipped_files.add(str(f))
-
-                    # Process the auto-created ZIP
                     organizer = DocumentOrganizer()
                     result = await organizer.process_zip(str(auto_zip_path))
                     logger.info("processing_result", **result)
-                    try:
-                        auto_zip_path.rename(auto_zip_path.with_suffix('.zip.processed'))
-                    except PermissionError:
-                        skipped_files.add(str(auto_zip_path))
+
+                    # Mark all files as processed so they aren't re-packed
+                    for _, ident in loose_files:
+                        processed_loose.add(ident)
 
                 except Exception as e:
                     logger.error("auto_package_processing_error", error=str(e))
-                    try:
-                        if auto_zip_path.exists():
-                            auto_zip_path.rename(auto_zip_path.with_suffix('.zip.error'))
-                    except PermissionError:
-                        skipped_files.add(str(auto_zip_path))
+                    # Still mark them so a persistent failure doesn't spin forever
+                    for _, ident in loose_files:
+                        processed_loose.add(ident)
+                finally:
+                    # Clean up temp ZIP
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
 
             await asyncio.sleep(10)
     
