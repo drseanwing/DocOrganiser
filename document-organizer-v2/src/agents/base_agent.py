@@ -262,7 +262,7 @@ class BaseAgent(ABC):
                     INSERT INTO processing_log 
                     (document_id, batch_id, action, phase, details, success, error_message, duration_ms)
                     VALUES 
-                    (:doc_id, :batch_id, :action, :phase, :details::jsonb, :success, :error, :duration)
+                    (:doc_id, :batch_id, :action, :phase, CAST(:details AS jsonb), :success, :error, :duration)
                 """),
                 {
                     "doc_id": document_id,

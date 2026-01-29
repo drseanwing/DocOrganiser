@@ -162,12 +162,13 @@ class OllamaService:
     async def pull_model(self) -> bool:
         """Pull the configured model if not already available."""
         try:
-            async with httpx.AsyncClient(timeout=300) as client:
+            # Model downloads can be large (1-4 GB); allow up to 15 minutes.
+            async with httpx.AsyncClient(timeout=900) as client:
                 response = await client.post(
                     f"{self.base_url}/api/pull",
                     json={"name": self.model, "stream": False}
                 )
                 return response.status_code == 200
         except Exception as e:
-            logger.error("model_pull_failed", error=str(e))
+            logger.error("model_pull_failed", error=str(e), model=self.model)
             return False
